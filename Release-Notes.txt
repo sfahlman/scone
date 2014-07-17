@@ -1,0 +1,78 @@
+Release Notes for the Scone Knowledge-Base System
+Author: Scott E. Fahlman <sef@cs.cmu.edu>
+===========================================================================
+User-visible changes from 0.8.22 to 0.9.0:
+===========================================================================
+This (0.9.0) is the first version released internally under git
+version-management.  Older versions are still available, but will be
+migrated to an archive subdirectory, and eventually to cold storage.
+
+The Scone User's Guide (SUG) is now (I believe) up to date for 0.9.0.
+Thanks go to Amos Ng and Natassia Kornilova for spotting
+discrepancies. Even though I preach about keeping documentation up to
+date at all times, the SUG fell behind during the extremely
+high-pressure period in which changes were driven by the IARPA
+Metaphor program.  Now that this project is just a bad memory, I hope
+and expect that we will keep the SUG up to date for each tagged
+release.
+
+There may still be some discrapncies between the SUG and the code that
+we didn't catch.  Please report any that you find.  Also note that
+some of the links between the crib sheet and index at the end and the
+code may be messed up for now.  This will be fixed sometime...  It's a
+big pain in Word.
+
+The old LOOKUP-ELEMENT-PREDICATE has been renamed LOOKUP-ELEMENT.  The
+old LOOKUP-ELEMENT has been renamed LOOKUP-ELEMENT-OR-DEFER.  That is,
+(LOOKUP-ELEMENT {FOO}) will now return NIL if {FOO} has not yet been
+defined as an element.  This is in preparation for removing the defer
+machinery altogether.  It is a kludge and is currently only used in
+the "bootstrap" KB file.
+
+Eliminated the :HINTS argument from DISAMBIGUATE and the various
+LOOKUP-ELEMENT functions.  This was just a place-holder until we would
+work on real disambiguation.
+
+Fixed a bug found by Anastassia: several of the "x-inverse-of-y"
+functions were not actually finding the inverse -- a cut-and-paste
+error, now fixed.
+
+Restored the default value of *comment-on-inferred-kb-changes* to T.
+That was the original setting, but when loading WordNet-derived files
+for the metaphor project, these comments became too verbose.  These
+comments can be verbose if a file creates types in no particular order
+instead of working top-down in the IS-A hierarchy.  However,
+if you turn this off, Scone will quietly create new type nodes for
+typos and things that never get properly defined, so you miss out on a
+lot of useful error-checking.  It's better to disable this checking
+only for specific files you are loading, if you must do it at all.
+
+Some new control variables in the code were not documented in the SUG:
+*CHECK-DEFINED-TYPES*, *CREATE-UNDEFINED-ELEMENTS*,
+*DEDUCE-OWNER-FROM-TYPE-ROLE*, and *COMMENT-ON-INFERRED-KB-CHANGES*.
+This omission has been fixed.
+
+Every call to COMMENTARY now puts the comment string on a line of its
+own, so the caller doesn't need to do that unless extra spacing is
+desired.  This was inconsistent before.
+
+Modify IN-CONTEXT so that it does nothing if the requested context is
+already the *CONTEXT*.
+
+The SUG description of NEW-INDV-ROLE and NEW-TYPE-ROLE was incorrect
+and inconsistent.  In one place there was some text describing a planned
+update that got sidetracked; in another place, the text was correct
+but out of date for some arguments.  I have updated the SUG to
+describe the current state of the code, but the quantification
+machinery for these functions is messed up and will soon be replaces.
+
+Most element-creating functions have a keyword arg :META, which is not
+really used anywhere.  This was a quick-and-dirty kludge for attaching
+things like probabilities and provenance to statements and
+world-models -- needed briefly for one past project and never really
+implemented right.  We will need this capability eventually, but will
+do it in a more thoughtful way.  For now I've ripped that stuff out.
+
+Went through the KB files in the release and made the header
+information consistent.
+
