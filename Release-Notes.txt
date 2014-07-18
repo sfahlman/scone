@@ -17,10 +17,12 @@ and expect that we will keep the SUG up to date for each tagged
 release.
 
 There may still be some discrapncies between the SUG and the code that
-we didn't catch.  Please report any that you find.  Also note that
-some of the links between the crib sheet and index at the end and the
-code may be messed up for now.  This will be fixed sometime...  It's a
-big pain in Word.
+we didn't catch.  Please report any that you find.  
+
+Note that some of the links between the crib sheet and index at the
+end and the code may be messed up for now.  This will be fixed
+sometime...  It's a big pain to maintain this in Word, and I'm
+thinking of moving the SUG to InDesign.
 
 The old LOOKUP-ELEMENT-PREDICATE has been renamed LOOKUP-ELEMENT.  The
 old LOOKUP-ELEMENT has been renamed LOOKUP-ELEMENT-OR-DEFER.  That is,
@@ -36,16 +38,6 @@ work on real disambiguation.
 Fixed a bug found by Anastassia: several of the "x-inverse-of-y"
 functions were not actually finding the inverse -- a cut-and-paste
 error, now fixed.
-
-Restored the default value of *comment-on-inferred-kb-changes* to T.
-That was the original setting, but when loading WordNet-derived files
-for the metaphor project, these comments became too verbose.  These
-comments can be verbose if a file creates types in no particular order
-instead of working top-down in the IS-A hierarchy.  However,
-if you turn this off, Scone will quietly create new type nodes for
-typos and things that never get properly defined, so you miss out on a
-lot of useful error-checking.  It's better to disable this checking
-only for specific files you are loading, if you must do it at all.
 
 Some new control variables in the code were not documented in the SUG:
 *CHECK-DEFINED-TYPES*, *CREATE-UNDEFINED-ELEMENTS*,
@@ -75,4 +67,12 @@ do it in a more thoughtful way.  For now I've ripped that stuff out.
 
 Went through the KB files in the release and made the header
 information consistent.
+
+Split *comment-on-inferred-kb-changes* into
+*comment-on-element-creation* and *comment-on-defined-types*.  The
+former is T by default.  It can be verbose, but catches lots of typos
+and false assumptions about what is already in the KB.  The latter is
+NIL by default.  It can be useful for debugging mysterious additions,
+but can be annoyingly verbose when loading files that are known to be
+correct.
 

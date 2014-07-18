@@ -49,16 +49,6 @@
 ;;; sickness, etc.  For more specialized scientific/medical applictions you
 ;;; would load a much more detailed file on top of this one.
 
-(new-complete-split-subtypes
- {animate}
- '({animal} {plant})
- :english "living thing")
-
-(new-complete-split-subtypes
- {animate}
- '(({mature} :adj "full-grown")
-   ({immature} :adj "juvenile")))
-
 ;;; Sex and Gender
 
 (new-complete-split-subtypes

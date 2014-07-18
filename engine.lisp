@@ -224,9 +224,15 @@
    we create and return the link.  If not, we return NIL, and the operation
    will be aborted.")
 
-(defvar *comment-on-inferred-KB-changes* t
-  "When Scone cleverly adds or alters network structure not specifically
-   requested by the user, comment on this via COMMENTARY.")
+(defvar *comment-on-element-creation* t
+  "When Scone creates a new element not specificially defined by the
+   user, usually because the element is referred to before it is
+   defined, comment on this via COMMENTARY.")
+
+(defvar *comment-on-defined-types* nil
+  "When Scone detects that some element satisfies the definition of a
+   defined type and adds the element to that type, comment on this via
+   COMMENTARY.")
 
 ;;; ========================================================================
 (subsection "Variables That Control Printing and Naming")
@@ -1405,7 +1411,7 @@
   (when (and *create-undefined-elements*
 	     (not *defer-unknown-connections*)
 	     (typep to '(or element-iname string)))
-    (when *comment-on-inferred-KB-changes*
+    (when *comment-on-element-creation*
       (commentary
        "~S is unknown.  Defining it as a type under {undefined thing}."
        to))
@@ -3239,7 +3245,7 @@
 	  (when (and (uppermost? x m1)
 		     (or (null predicate)
 			 (funcall (the function predicate) x)))
-	    (when *comment-on-inferred-KB-changes*
+	    (when *comment-on-defined-types*
 	      (commentary "Adding ~S to defined type ~S." x e))
 	    (new-is-a x e))))
       ;;; Not enough markers, error.
@@ -3307,7 +3313,7 @@
 		     (funcall pred candidate)))
 	;; We have a winner.  Add E to the defined class.  Else, fall
 	;; through with NIL.
-	(when *comment-on-inferred-KB-changes*
+	(when *comment-on-defined-types*
 	  (commentary "Adding ~S to defined type ~S."
 		      candidate dtype))
 	(let ((*check-defined-types* nil))
@@ -6181,7 +6187,7 @@ English Names: ~20T~10:D
 	  ((and *create-undefined-elements*
 		(not *defer-unknown-connections*)
 		(typep name '(or element-iname string)))
-	   (when *comment-on-inferred-KB-changes*
+	   (when *comment-on-element-creation*
 	     (commentary
 	      "~S is unknown.  Defining it as a type under {undefined thing}."
 	      name))

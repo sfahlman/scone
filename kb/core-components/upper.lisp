@@ -162,6 +162,16 @@
 
 (new-is-a {animate} {natural object})
 
+(new-complete-split-subtypes
+ {animate}
+ '({animal} {plant})
+ :english "living thing")
+
+(new-complete-split-subtypes
+ {animate}
+ '(({mature} :adj "full-grown")
+   ({immature} :adj "juvenile")))
+
 ;;; Stuff and Materials
 
 ;;; We use {stuff} to include pseudo-subtances like time and information.
