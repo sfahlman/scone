@@ -19,10 +19,13 @@ release.
 There may still be some discrapncies between the SUG and the code that
 we didn't catch.  Please report any that you find.  
 
-Note that some of the links between the crib sheet and index at the
-end and the code may be messed up for now.  This will be fixed
-sometime...  It's a big pain to maintain this in Word, and I'm
-thinking of moving the SUG to InDesign.
+I've removed the "Crib Sheet" section from the SUG.  It was
+occasionally useful, but was a very big pain to keep up to date by
+hand.  There are various automated tools that may do this job, and in
+the meantime it's pretty easy to go to the alphabetical index or table
+of contents to find whatever you're looking for.  (Some of the
+hyperlinks from the alphabetical index to the text may still be
+broken.  I'll check and update this when I get a chance.)
 
 The old LOOKUP-ELEMENT-PREDICATE has been renamed LOOKUP-ELEMENT.  The
 old LOOKUP-ELEMENT has been renamed LOOKUP-ELEMENT-OR-DEFER.  That is,
