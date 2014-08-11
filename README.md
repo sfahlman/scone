@@ -8,7 +8,7 @@ The Scone release indcludes the Scone engine, a large program written in Common 
 
 The core capabilities of Scone have been running for several years, and have been used in a number of projects at CMU and by a few outside collaborators.  It has always been our intention to release Scone as an open-soure resource for the research community and other potential users.  Our research group is very small at present, and we are all very busy on our ongoing research efforts on Scone and related applications (plus the never-ending quest to keep the project funded).  So we welcome comments, queries, contributions, suggestions, and even requests for new functionality, but we cannot promise anything in the way of timely support for external users and potential contributors.  So for now, Scone is for the adventurous and for those who can answer some of their own questions by looking at our code and assorted documents and papers.
 
-For additional information about Scone, please see our [Scone project home page](http://www.cs.cmu.edu/~sef/scone/).  Additional information on our overall goals and approach, and some assorted other musings about AI, are on Scott Fahlman's [Knowledge Nuggets blog](www.cs.cmu.edu/~nuggets).
+For additional information about Scone, please see our [Scone project home page](http://www.cs.cmu.edu/~sef/scone/).  Additional information on our overall goals and approach, and some assorted other musings about AI, are on Scott Fahlman's [Knowledge Nuggets blog](http://www.cs.cmu.edu/~nuggets).
 
 
 
