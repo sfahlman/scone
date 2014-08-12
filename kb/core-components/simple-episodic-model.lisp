@@ -1,6 +1,6 @@
 ;;; -*- Mode:Lisp -*-
 ;;; ***************************************************************************
-;;; Core knowledge about actions, events, sequences of actions, and plan for
+;;; Core knowledge about actions, events, sequences of actions, and plans for
 ;;; Scone's core knowledge base.
 ;;;
 ;;; Constributors: E. Cinar Sahin
