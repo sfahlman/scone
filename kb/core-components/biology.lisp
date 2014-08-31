@@ -142,10 +142,16 @@
 (new-is-a {bird} {flying})
 (new-is-a {mammal} {non-flying})
 
+;;; {person} defined earlier.
+(new-is-a {person} {mammal})
+
 ;;; Define a few animal types, just as an example.
-(new-split-subtypes {mammal}
-		    '({elephant} {lion} {tiger} {bat} {monkey} {person}
-		      {pig} {horse} {cow} {donkey} {dog} {cat} {whale}))
+(let ((mammal-split
+       (new-split-subtypes
+	{mammal}
+	'({elephant} {lion} {tiger} {bat} {monkey}
+	  {pig} {horse} {cow} {donkey} {dog} {cat} {whale}))))
+  (add-to-split mammal-split {person}))
 
 (new-is-not-a {bat} {non-flying})
 (new-is-a {bat} {flying})
