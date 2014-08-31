@@ -88,7 +88,7 @@
 ;;; a physical object has mass.  For more specialized scientific/engineering
 ;;; applications you would load a much more detailed file on top of this one.
 
-(load-kb "core-components/simple-physics")
+(load-kb "core-components/physics")
 
 ;;;; -------------------------------------------------------------------------
 ;;;; SIMPLE BIOLOGY & MEDICINE
@@ -99,7 +99,7 @@
 ;;; For more specialized scientific/medical applictions you would load
 ;;; a much more detailed file on top of this one.
 
-(load-kb "core-components/simple-biology")
+(load-kb "core-components/biology")
 
 ;;;; ----------------------------------------------------------------------
 ;;;; INFORMATION, FILES, AND MESSAGES
@@ -108,7 +108,7 @@
 ;;; almost any "common sense" application.  The Person model uses this
 ;;; heavily.
 
-(load-kb "core-components/simple-information")
+(load-kb "core-components/information")
 
 ;;;; ----------------------------------------------------------------------
 ;;;; SOCIAL
@@ -116,7 +116,7 @@
 ;;; General knowledge about human organizations and social relationships that you would
 ;;; want around for almost any "common sense" application.
 
-(load-kb "core-components/simple-social-model")
+(load-kb "core-components/social-model")
 
 ;;;; ----------------------------------------------------------------------
 ;;;; ASPECTS OF PERSON
@@ -124,19 +124,19 @@
 ;;; General knowledge about people that you would want around for
 ;;; almost any "common sense" application.
 
-(load-kb "core-components/simple-person-model")
+(load-kb "core-components/person-model")
 
 ;;;; ----------------------------------------------------------------------
-;;;; EPISODIC MEMORY
+;;;; EPISODIC REPRESENTATION AND REASONING
 
 ;;; General knowledge of events, actions, sequences, and plans.
 
-(load-kb "core-components/simple-episodic-model")
+(load-kb "core-components/episodic")
 
 ;;;; ----------------------------------------------------------------------
 ;;;; GEOPOLITICS
 
 ;;; General knowledge of geography, government, and politics.
 
-(load-kb "core-components/simple-geopolitics")
+(load-kb "core-components/geopolitics")
 

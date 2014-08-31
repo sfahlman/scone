@@ -59,58 +59,6 @@
 ;;; area of planning, this would be augmented with a lot of additional
 ;;; episodic knowledge that is domain-specific.
 
-;;; Roots of the episodic system: actions, events, time.
-
-;;; Event
-(setq *event*
-      (new-type {event} {thing}
-		:english '("happening" "occurrence")))
-
-;;; Every event has a {before context} and an {after context}.
-(new-indv-role {before context} {event} {intangible})
-(new-indv-role {after context} {event} {intangible})
-
-;;; The AFTER CONTEXT starts out as a clone of the BEFORE CONTEXT.
-;;; Then we can make changes.
-(new-is-a {after context} {before context})
-
-;;; Often events have a location.
-(new-indv-role {event location} {event} {place}
-	       :english '("location" "venue" "place")
-	       :may-have t)
-
-;;; An event has a time interval, which in turn has a start-time,
-;;; end-time, and duration.
-(new-indv-role {event time} {event} {time interval})
-
-;;; Any thing may be listed as the cause of an event.
-(new-relation {causes}
-	      :a-inst-of {thing}
-	      :b-inst-of {event})
-
-;;; Events in general have subevents.
-(new-type-role {subevent} {event} {event})
-
-;;; Anything that we think of as capable of acting on its own.
-(setq *potential-agent*
-      (new-type {potential agent} {thing}))
-
-(new-intersection-type {automaton} '({man-made object}
-				     {potential agent}))
-
-(new-is-a {animate} {potential agent})
-(new-is-a {organization} {potential agent})
-
-
-(new-complete-split {potential agent}
-		    '({animate} {organization} {automaton}))
-
-;;; A {legal person} can own things, make contracts, etc.  Exclude,
-;;; for now, automata and non-human animals.
-(new-union-type {legal person}
-		{potential agent}
-		'({person} {organization}))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Actions
 
