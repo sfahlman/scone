@@ -18,4 +18,12 @@ elements.
 Began consolidating some of Laleh's KB stuff from the
 vehicle-maintenance domain into a new directory that is not (for now)
 part of "core".  Began consolidating episodic stuff from Laleh and
-Maria into episodic.lisp, and began adding some of my own augmentations.
+Maria into episodic.lisp, and began adding some of my own
+augmentations.
+
+Remove *kb-logging-stream* and the functionality that supports it.
+This continuous-logging facility was added during the RADAR project on
+the theory that it made a continuously-learning system more robust
+than occasional checkpointing.  But to the best of my knowledge it has
+never been used, and keeping it all consistent has been a big extra
+drag on engine development.
