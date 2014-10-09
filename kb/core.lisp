@@ -54,7 +54,7 @@
 ;;; don't need to be in "bootstrap.lisp".  As a rule, the bootstrap file contains
 ;;; only those structures that Scone engine code has to refer to.
 
-(load-kb "core-components/upper")
+(require-kb "core-components/upper")
 
 ;;;; -------------------------------------------------------------------------
 ;;;; UNITS
@@ -62,7 +62,7 @@
 ;;; Load the KB file defining units, measurable qualities, measures, and
 ;;; quantities.
 
-(load-kb "core-components/units")
+(require-kb "core-components/units")
 
 ;;;; -------------------------------------------------------------------------
 ;;;; SPACE MODEL
@@ -70,7 +70,7 @@
 ;;; The minimal space model that you would want for almost all "common sense"
 ;;; reasoning.
 
-(load-kb "core-components/space-model")
+(require-kb "core-components/space-model")
 
 ;;;; -------------------------------------------------------------------------
 ;;;; TIME MODEL
@@ -78,7 +78,7 @@
 ;;; Scone's time model.  This is essential for reasoning about actions
 ;;; and events, for example.
 
-(load-kb "core-components/time-model")
+(require-kb "core-components/time-model")
 
 ;;;; -------------------------------------------------------------------------
 ;;;; SIMPLE PHYSICS & CHEMISTRY
@@ -88,7 +88,7 @@
 ;;; a physical object has mass.  For more specialized scientific/engineering
 ;;; applications you would load a much more detailed file on top of this one.
 
-(load-kb "core-components/physics")
+(require-kb "core-components/simple-physics")
 
 ;;;; -------------------------------------------------------------------------
 ;;;; SIMPLE BIOLOGY & MEDICINE
@@ -99,7 +99,7 @@
 ;;; For more specialized scientific/medical applictions you would load
 ;;; a much more detailed file on top of this one.
 
-(load-kb "core-components/biology")
+(require-kb "core-components/simple-biology")
 
 ;;;; ----------------------------------------------------------------------
 ;;;; INFORMATION, FILES, AND MESSAGES
@@ -108,7 +108,7 @@
 ;;; almost any "common sense" application.  The Person model uses this
 ;;; heavily.
 
-(load-kb "core-components/information")
+(require-kb "core-components/simple-information")
 
 ;;;; ----------------------------------------------------------------------
 ;;;; SOCIAL
@@ -116,7 +116,7 @@
 ;;; General knowledge about human organizations and social relationships that you would
 ;;; want around for almost any "common sense" application.
 
-(load-kb "core-components/social-model")
+(require-kb "core-components/simple-social-model")
 
 ;;;; ----------------------------------------------------------------------
 ;;;; ASPECTS OF PERSON
@@ -124,19 +124,19 @@
 ;;; General knowledge about people that you would want around for
 ;;; almost any "common sense" application.
 
-(load-kb "core-components/person-model")
+(require-kb "core-components/simple-person-model")
 
 ;;;; ----------------------------------------------------------------------
-;;;; EPISODIC REPRESENTATION AND REASONING
+;;;; EPISODIC MEMORY
 
 ;;; General knowledge of events, actions, sequences, and plans.
 
-(load-kb "core-components/episodic")
+(require-kb "core-components/simple-episodic-model")
 
 ;;;; ----------------------------------------------------------------------
 ;;;; GEOPOLITICS
 
 ;;; General knowledge of geography, government, and politics.
 
-(load-kb "core-components/geopolitics")
+(require-kb "core-components/simple-geopolitics")
 
