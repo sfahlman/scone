@@ -83,7 +83,7 @@
 	       (the-x-role-of-y {member} {finite sequence})
 	       :english '(:role "last element"))
 
-#| %%% These don't work until we fix a bug in negation.
+#| %%% These don't work until we fix negation.
 
 ;; The last member of a finite set has no successor.
 (x-has-no-y {last member} {successor})
@@ -171,8 +171,6 @@
  {animate}
  '(({mature} :adj "full-grown")
    ({immature} :adj "juvenile")))
-
-(new-type {person} {animal})
 
 ;;; Stuff and Materials
 
@@ -267,6 +265,7 @@
 		       '({economic condition} {good thing}))
 (new-intersection-type {bad economic condition}
 		       '({economic condition} {bad thing}))
+
 (new-intersection-type {good health condition}
 		       '({health condition} {good thing}))
 (new-intersection-type {bad health condition}

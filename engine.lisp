@@ -286,6 +286,19 @@
     (apply #'format (cons *commentary-stream* args))
     (terpri *commentary-stream*)))
 
+(defvar *kb-logging-stream* nil
+  "If non-nil, every KB alteration is reflected by an entry to this stream,
+   so that the resulting file can be read back in with RELOAD-KB.")
+(declaim (type stream *logging-stream*))
+
+(defun kb-log (&rest args)
+  "Syntax is just like FORMAT with no stream arg.  If *KB-LOGGING-STREAM*
+   is non-null, execute the format call, writing the resulting string out
+   to the KB logging stream."
+  (when *kb-logging-stream*
+    (apply #'format *kb-logging-stream* args)
+    (force-output *kb-logging-stream*)))
+
 ;;; ========================================================================
 (subsection "Variables Related to Element Names")
 
@@ -1088,6 +1101,9 @@
 	(describe x stream)
 	(format stream "~S is an element-iname structure.~%" obj))))
 
+(to-do "Write a new DECSRIBE-OBJECT method for Scone elements so that
+   the result is more understandable and less cluttered.")
+
 (defun make-element (flags iname parent context a b c 
 			   english english-default hashtable definition
 			   properties)
@@ -1132,11 +1148,11 @@
     ;; Tick the element counter.
     (incf (the fixnum *n-elements*))
     ;; Process all the outoging wire connections.
-    (when parent (connect-wire :parent e parent t))
-    (when context (connect-wire :context e context t))
-    (when a (connect-wire :a e a t))
-    (when b (connect-wire :b e b t))
-    (when c (connect-wire :c e c t))
+    (when parent (connect-wire :parent e parent t t))
+    (when context (connect-wire :context e context t t))
+    (when a (connect-wire :a e a t t))
+    (when b (connect-wire :b e b t t))
+    (when c (connect-wire :c e c t t))
     ;; Process English names, if any.
     (unless (listp english)
       (setq english (list english)))
@@ -1158,35 +1174,51 @@
     ;;; If there is a :PLIST argument, that becomes the property list.
     (when properties
       (set-properties e properties t))
+    ;;; Log the creation of a new element.
+    (kb-log "(make-element ~S ~S ~S ~S ~S ~S ~S '~S '~S '~S '~S '~S '~S)~%"
+	    flags iname parent context a b c english english-default
+	    hashtable definition properties)
     e))
 
 ;;; ========================================================================
 (subsection "Low-Level Element Operations")
 
-(defun set-flag (e flag)
-  "Set the specified FLAG (a bit mask) in element E."
+(defun set-flag (e flag &optional (already-logged nil))
+  "Set the specified FLAG (a bit mask) in element E.  Log this KB change
+   unless it was done already."
   (declare (fixnum flag))
   (prog1
       (setf (flags e)
-	    (logior (flags e) flag))))
+	    (logior (flags e) flag))
+    (unless already-logged
+      (kb-log "(set-flag ~S '~S)~%" e flag))))
 
-(defun clear-flag (e flag)
-  "Clear the specified FLAG (a bit mask) in element E."
+(defun clear-flag (e flag &optional (already-logged nil))
+  "Clear the specified FLAG (a bit mask) in element E.  Log this KB change
+   unless it was done already."
   (declare (fixnum flag))
   (prog1
       (setf (flags e)
-	    (logand (flags e) (lognot flag)))))
+	    (logand (flags e) (lognot flag)))
+    (unless already-logged
+      (kb-log "(clear-flag ~S '~S)~%" e flag))))
 
-(defun set-definition (e definition)
-  "Add DEFINITION to element E, setting the defined-flag of E."
+(defun set-definition (e definition &optional (already-logged nil))
+  "Add DEFINITION to element E, setting the defined-flag of E.  Log the KB
+   change unless this has already been done."
   (setq e (lookup-element-test e))
   (setf (definition e) definition)
-  (set-flag e defined-flag))
+  (set-flag e defined-flag t)
+  (unless already-logged
+    (kb-log "(set-definition ~S '~S)~%" e definition)))
 
-(defun set-properties (e plist)
-  "Set the property list of element E to PLIST."
+(defun set-properties (e plist &optional (already-logged nil))
+  "Set the property list of element E to PLIST.  Log the KB change unless
+   this has already been done."
   (setq e (lookup-element-test e))
-  (setf (properties e) plist))
+  (setf (properties e) plist)
+  (unless already-logged
+    (kb-log "(set-properties ~S '~S)~%" e plist)))
 
 (defmacro do-elements ((var &optional (after nil)) &body body)
   "This macro iterates over the set of all elements.  Each element in turn
@@ -1310,21 +1342,31 @@
    not present."
   `(getf (properties ,e) ,property))
 
-(defun set-element-property (e property &optional (value t))
+(defun set-element-property (e property &optional (value t)
+			       (already-logged nil))
   "Set the specified PROPERTY of element E to the designated VALUE,
-   which defaults to T."
+   which defaults to T.  Log this KB change unless it was done already."
   (prog1
-      (setf (getf (properties e) property) value)))
+      (setf (getf (properties e) property) value)
+    (unless already-logged
+      (kb-log "(set-element-property ~S '~S '~S)~%" e property value))))
 
-(defun clear-element-property (e property)
+(defun clear-element-property (e property &optional (already-logged nil))
   "Remove the specified PROPERTY of element E.  If E doesn't have this property,
-   do nothing."
-  (remf (properties e) property))
+   do nothing.  Log this KB change unless it was done already."
+  (prog1
+      (remf (properties e) property)
+    (unless already-logged
+      (kb-log "(clear-element-property ~S '~S)~%" e property))))
 
-(defun push-element-property (e property value)
+(defun push-element-property (e property value &optional (already-logged nil))
   "The PROPERTY of E should be a list.  Push VALUE onto this list.  Create
-   the property if it doesn't already exist."
-  (push value (getf (properties e) property)))
+   the property if it doesn't already exist.  Log this KB change
+   unless it was done already."
+  (prog1 
+      (push value (getf (properties e) property))
+    (unless already-logged
+      (kb-log "(push-element-property ~S '~S '~S)~%" e property value))))
 
 ;;; ***************************************************************************
 (section "Accessing, Connecting, and Disconnecting Wires")
@@ -1354,11 +1396,13 @@
     (:parent (incoming-parent-wires e))
     (:context (incoming-context-wires e))))
 
-(defun connect-wire (wire-name from to &optional (may-defer nil))
+(defun connect-wire (wire-name from to &optional (may-defer nil)
+			       (already-logged nil))
   "Connect the wire specified by WIRE-NAME (:A, :PARENT, etc.) of
    element FROM to element TO.  If FROM is already connected
-   somewhere, disconnect it first.  If connecting a context-wire to an
-   active TO node, activate the FROM node as well."
+   somewhere, disconnect it first.  Log the KB change if it is not
+   already logged.  If connecting a context-wire to an active TO node,
+   activate the FROM node as well."
   (setq from (lookup-element-test from))
   (setq to (lookup-element-or-defer to))
   ;; If the element is not yet defined, but *CREATE-UNDEFINED-ELEMENTS*
@@ -1376,7 +1420,7 @@
 	 ;; At this point, TO is an element, so build the connection.
 	 (when (and (wire wire-name from)
 		    (not (eq wire-name :split)))
-	   (disconnect-wire wire-name from))
+	   (disconnect-wire wire-name from t))
 	 (ecase wire-name
 	   (:a (setf (a-wire from) to)
 	       (push from (incoming-a-wires to)))
@@ -1392,17 +1436,21 @@
 		     (when (fast-marker-on? to *activation-marker*)
 		       (fast-mark from *activation-marker*)))
 	   (:split (push to (split-wires from))
-		   (push from (incoming-split-wires to)))))
+		   (push from (incoming-split-wires to))))
+	 ;; Log the new connection.
+	 (unless already-logged
+	   (kb-log "(connect-wire ~S ~S ~S ~S)~%" wire-name from to may-defer)))
 	;; The TO argument is not an existing connection.  Defer it if allowed
 	;; to, or signal an error.
 	((and may-defer (typep to '(or element-iname string)))
 	 (defer-connection wire-name from to))
 	(t (error "~S is not an element." to))))
 
-(defun disconnect-wire (wire-name from)
+(defun disconnect-wire (wire-name from &optional (already-logged nil))
   "Disconnect the wire specified by WIRE-NAME (:A, :PARENT, etc.)  of
    element FROM from wherever it is currently connected to.  If it is
-   not connected, do nothing."
+   not connected, do nothing.  Log the KR change if it is not already
+   logged."
   (setq from (lookup-element-test from))
   (let ((to (wire wire-name from)))
     (when to
@@ -1421,27 +1469,34 @@
 		       (delete from (incoming-parent-wires to))))
 	(:context (setf (context-wire from) nil)
 		  (setf (incoming-context-wires to)
-			(delete from (incoming-context-wires to))))))))
+			(delete from (incoming-context-wires to)))))
+      ;; Log the new connection.
+      (unless already-logged
+	(kb-log "(disconnect-wire ~S ~S)~%" wire-name from)))))
 
 ;;; We need a separate function for disconnecting one split wire, since we
 ;;; need to specify the TO argument.
 
-(defun disconnect-split-wire (from to)
+(defun disconnect-split-wire (from to &optional (already-logged nil))
   "Disconnect the SPLIT-wire between element FROM and element TO.  If they
-   are not connected, do nothing."
+   are not connected, do nothing.  Log the KR change if it is not already
+   logged."
   (declare (type element from to))
   (setq from (lookup-element-test from))
   (setq to (lookup-element-test to))
   (setf (split-wires from)
 	(delete to (split-wires from)))
   (setf (incoming-split-wires to)
-	(delete from (incoming-split-wires to))))
+	(delete from (incoming-split-wires to)))
+  ;; Log the new connection.
+  (unless already-logged
+    (kb-log "(disconnect-split-wire ~S ~S)~%" from to)))
 
-(defun disconnect-split-wires (from)
+(defun disconnect-split-wires (from &optional (already-logged nil))
   "Disconnect all the SPLIT-wires between element FROM and other elements."
   (setq from (lookup-element-test from))
   (dolist (to (split-wires from))
-    (disconnect-split-wire from to)))
+    (disconnect-split-wire from to already-logged)))
 
 (defun convert-parent-wire-to-link (e &key (context *context*))
   "The parent-wire of element E is disconnected and replaced by an
@@ -2505,8 +2560,8 @@
 		complete-split-mask)
 	    iname parent context
 	    nil nil nil english nil nil nil nil)))
-    (set-element-property s :split-supertype supertype)
-    (push-element-property supertype :complete-split-subtypes s)
+    (set-element-property s :split-supertype supertype t)
+    (push-element-property supertype :complete-split-subtypes s t)
     (dolist (m members)
       (setq m (lookup-element-test m))
       (connect-wire :split s m))
@@ -6362,6 +6417,7 @@ English Names: ~20T~10:D
    this KB change."
   (setq element (lookup-element-test element))
   (english-internal element r)
+  (kb-log "(english-internal ~S '~S)~%" element r)
   element)
 
 (defun english-internal (element namelist)
@@ -6442,7 +6498,8 @@ English Names: ~20T~10:D
 	    (nconc definitions (list new2)))
       (set-element-property element
 			    :english-names
-			    (nconc element-names (list new1))))))
+			    (nconc element-names (list new1))
+			    t))))
 
 (defun unregister-definition (string
 			      element)
@@ -6701,6 +6758,23 @@ English Names: ~20T~10:D
     (force-output *terminal-io*)
     (values)))
 
+(defun require-kb (filename &key (verbose nil))
+  "Checks if a given KB file is loaded or loading. If it is, do 
+   nothing (return NIL). Otherwise, load it."
+  (let ((pathname (merge-pathnames (pathname filename) 
+				   *default-kb-pathname*)))
+    ;; Check if the KB file is in *LOADED-FILES* or 
+    ;; *CURRENTLY-LOADING-FILES*. Only load the file if it is 
+    ;; not in either of these lists. 
+    (if (reduce (lambda (x y) (or x y))
+		(mapcar (lambda (xs) 
+			  (member pathname xs :test #'equal))
+			(list *loaded-files* *currently-loading-files*)))
+	;; If already loaded, do nothing. 
+	()
+      ;; Else, load the kb. 
+      (load-kb filename :verbose verbose))))
+ 
 (defun process-deferred-connections ()
   "Go through the *DEFERRED-CONNECTIONS* list and connect all the wires
    that can be connected at this time.  Leave the rest on the list."
@@ -6878,6 +6952,48 @@ English Names: ~20T~10:D
 	    zone
 	    (if dst " (DST)" ""))))
 
+(defun start-kb-logging (&optional (filename "kb-log"))
+  "Starting now, for each change to the KB, write out a log entry to a
+   kb-log file.  If the system dies unexpectedly, we can restore the
+   current state of the system by reading in this log file using LOAD-KB.
+   We do not attempt to restore the state of the markers, which is
+   considered ephemeral.  If the system dies while writing out a log entry,
+   this mechanism still should work, though the last partial entry may be
+   lost.  Use *DEFAULT-KB-PATHNAME* to complete any unsupplied
+   components of the FILENAME."
+  (if *kb-logging-stream*
+      (commentary "Scone is already logging KB changes.")
+      ;;; Open and initialize the KB logging file.
+      (let* ((pathname
+	      (merge-pathnames filename *default-kb-pathname*)))
+	(setq *kb-logging-stream*
+	      (open pathname
+		    :direction :output
+		    :if-exists :supersede
+		    :external-format :utf8))
+	(kb-log "~&;;; Scone KB Logging File ~S~%" pathname)
+	(kb-log "~&;;; Opened on ~S.~2%" (current-time-string))
+	;; Note what files are loaded, so that when the log file is read
+	;; back in, this will be checked.
+	(kb-log "~&(check-loaded-files '~S)~%" 
+		(mapcar #'pathname-name *loaded-files*))
+	(kb-log "~&(new-iname-prefix ~A)~%" *iname-prefix*)
+	;; If there are new elements since the last LOAD-KB, dump them to the
+	;; log file.
+	(unless (eq (car *last-loaded-elements*) *last-element*)
+	  (commentary "Dumping all newly created elements to log file.")
+	  (do-elements (e (car *last-loaded-elements*))
+	    (dump-element e *kb-logging-stream*)))
+	(commentary "Scone is now logging KB changes.")
+	(values))))
+
+(defun end-kb-logging ()
+  (when *kb-logging-stream*
+    (kb-log "~%;;; End of KB logging file.  ~S~%" (current-time-string))
+    (close *kb-logging-stream*)
+    (commentary ";;; KB logging terminated.")
+    (values)))
+
 ;;; ***************************************************************************
 (section "Removing Elements from the KB")
 ;;; ***************************************************************************
@@ -6915,6 +7031,7 @@ English Names: ~20T~10:D
   ;; Remove E from name hashtables.
   (unregister-internal-name e)
   (unregister-all-names e)
+  (kb-log "(remove-element ~S)~%" e)
   *n-elements*)
 
 (defun remove-last-element ()

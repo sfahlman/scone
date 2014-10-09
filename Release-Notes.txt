@@ -1,29 +1,102 @@
 Release Notes for the Scone Knowledge-Base System
 Author: Scott E. Fahlman <sef@cs.cmu.edu>
+
+---------------------------------------------------------------------------
+Changes made by Cherie Yang <cherie@cmu.edu>, committed 10/8/2014
+
+- Wrote REQUIRE-KB, which checks if a KB is already loaded before loading, 
+  skipping if it has already been loaded. Most recent changes: 
+    o Removed printed commentary. 
+    o Added verbose keyword argument. 
+- Added REQUIRE-KB to the Scone User's Guide. 
+- Rewrote core.lisp to use REQUIRE-KB instead of LOAD-KB. 
+---------------------------------------------------------------------------
+
 ===========================================================================
-User-visible changes since v1.0.0:
+User-visible changes from 0.8.22 to 1.0.0:
 ===========================================================================
-Eliminated all the "simple" prefixes in the core-components files,
-and updated the core.lisp file to load the new names.  Some of these
-files are indeed very minimal, but I don't want to be thinking about
-how complex they have to be before we drop the "simple".  If some
-files ultimately have a simple "core" version and a more complex
-version for some class of applications, we can worry about appropriate
-naming then.
+This (1.0.0) is the first version released to external users via
+GitHub.  Older versions are still available, but will be migrated to
+an archive subdirectory, and eventually to cold storage.
 
-Moved some upper-ontology stuff (e.g. the definition of {event}) from
-episodic.lisp to upper-lisp, since other things will need to see these
-elements.
+The Scone User's Guide (SUG) is now (I believe) up to date for 1.0.0.
+Thanks go to Amos Ng and Natassia Kornilova for spotting
+discrepancies. Even though I preach about keeping documentation up to
+date at all times, the SUG fell behind during the extremely
+high-pressure period in which changes were driven by the IARPA
+Metaphor program.  Now that this project is just a bad memory, I hope
+and expect that we will keep the SUG up to date for each tagged
+release.
 
-Began consolidating some of Laleh's KB stuff from the
-vehicle-maintenance domain into a new directory that is not (for now)
-part of "core".  Began consolidating episodic stuff from Laleh and
-Maria into episodic.lisp, and began adding some of my own
-augmentations.
+There may still be some discrapncies between the SUG and the code that
+we didn't catch.  Please report any that you find.  
 
-Remove *kb-logging-stream* and the functionality that supports it.
-This continuous-logging facility was added during the RADAR project on
-the theory that it made a continuously-learning system more robust
-than occasional checkpointing.  But to the best of my knowledge it has
-never been used, and keeping it all consistent has been a big extra
-drag on engine development.
+I've removed the "Crib Sheet" section from the SUG.  It was
+occasionally useful, but was a very big pain to keep up to date by
+hand.  There are various automated tools that may do this job, and in
+the meantime it's pretty easy to go to the alphabetical index or table
+of contents to find whatever you're looking for.
+
+I have also moved to automatic generation of the aplphabetical index
+via Word.  Unfortunately, while word has a nice facility for
+generating indices of various kinds, based on tags you place in the
+text, the index contains only page numbers and not hyperlinks back to
+the indexed item or items.  This is an inexplicable omission in an
+increasingly online world.  Apparently Adobe InDesign does produce
+these hyperlinks, so I may be moving the SUG to InDesign in the
+not-too-distant future.
+
+The old LOOKUP-ELEMENT-PREDICATE has been renamed LOOKUP-ELEMENT.  The
+old LOOKUP-ELEMENT has been renamed LOOKUP-ELEMENT-OR-DEFER.  That is,
+(LOOKUP-ELEMENT {FOO}) will now return NIL if {FOO} has not yet been
+defined as an element.  This is in preparation for removing the defer
+machinery altogether.  It is a kludge and is currently only used in
+the "bootstrap" KB file.
+
+Eliminated the :HINTS argument from DISAMBIGUATE and the various
+LOOKUP-ELEMENT functions.  This was just a place-holder until we would
+work on real disambiguation.
+
+Fixed a bug found by Anastassia: several of the "x-inverse-of-y"
+functions were not actually finding the inverse but rather the forward
+version -- a cut-and-paste error, now fixed.
+
+Some new control variables in the code were not documented in the SUG:
+*CHECK-DEFINED-TYPES*, *CREATE-UNDEFINED-ELEMENTS*,
+*DEDUCE-OWNER-FROM-TYPE-ROLE*, and *COMMENT-ON-INFERRED-KB-CHANGES*.
+This omission has been fixed.
+
+Every call to COMMENTARY now puts the comment string on a line of its
+own, so the caller doesn't need to do that unless extra spacing is
+desired.  This was inconsistent before.
+
+Modify IN-CONTEXT so that it does nothing if the requested context is
+already the *CONTEXT*.  We still need additional work to make it more
+efficient to change contexts frequently.
+
+The SUG description of NEW-INDV-ROLE and NEW-TYPE-ROLE was incorrect
+and inconsistent.  In one place there was some text describing a planned
+update that got sidetracked; in another place, the text was correct
+but out of date for some arguments.  I have updated the SUG to
+describe the current state of the code, but the quantification
+machinery for these functions is messed up and will soon be replaced.
+
+Most element-creating functions have a keyword arg :META, which is not
+really used anywhere.  This was a quick-and-dirty kludge for attaching
+things like probabilities and provenance to statements and
+world-models -- needed briefly for one past project and never really
+implemented right.  We will need this capability eventually, but will
+do it in a more thoughtful way.  For now I've ripped that stuff out.
+
+Went through the KB files in the release and made the header
+information consistent.
+
+Split *comment-on-inferred-kb-changes* into
+*comment-on-element-creation* and *comment-on-defined-types*.  The
+former is T by default.  It can be verbose, but catches lots of typos
+and false assumptions about what is already in the KB.  The latter is
+NIL by default.  It can be useful for debugging mysterious additions,
+but can be annoyingly verbose when loading files that are known to be
+correct.
+
+
