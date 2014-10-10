@@ -6174,8 +6174,9 @@ English Names: ~20T~10:D
 
 (defun lookup-element-test (name &key syntax-tags)
   "Given an element name, look up and return the corresponding element.  If
-   the element doesn't yet exist, signal an error.  If we are given a
-   string, we look this up as an English name.  :SYNTAX-TAGS, if present,
+   the element doesn't yet exist, either create it if
+   *create-undefined-elements* is set or signal an error otherwise. If we are
+   given a string, we look this up as an English name. :SYNTAX-TAGS, if present,
    is a list of tags that we will consider in this lookup."
   (multiple-value-bind (element tag)
       (lookup-element name :syntax-tags syntax-tags)
