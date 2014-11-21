@@ -27,3 +27,12 @@ the theory that it made a continuously-learning system more robust
 than occasional checkpointing.  But to the best of my knowledge it has
 never been used, and keeping it all consistent has been a big extra
 drag on engine development.
+
+Modified IS-X-A-Y? and IS-X-EQ-Y? to return the proper second values,
+as documented in the Scone User's Guide..  That is, if the answer is :NO due to a violated split
+or an explicit NOT-EQ link, return that split or link as the second
+value.  This is the item you should cancel if you want to force the
+answer to be :YES.
+
+NOTE:  There's still a bug here.  It appears that NOT-EQ is not
+placing negation markers correctly.  This will be fixed soon.

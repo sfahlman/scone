@@ -1154,10 +1154,10 @@
     ;; If there is a definition, record it and make sure the defined-flag
     ;; is set.
     (when definition
-      (set-definition e definition t))
+      (set-definition e definition))
     ;;; If there is a :PLIST argument, that becomes the property list.
     (when properties
-      (set-properties e properties t))
+      (set-properties e properties))
     e))
 
 ;;; ========================================================================
@@ -4762,15 +4762,42 @@ some conditions.  Examine and fix if necessary.")
 
 (defun is-x-a-y? (x y)
   "Predicate to determine whether type or individual X is or can be a
-   Y in the current context.  Returns :yes if X is known to be a Y,:no
-   if X definitely cannot be a Y, and :maybe otherwise.  For the :no
-   response, returns a second value, the split or superior type node
-   that is conflicted."
-  (let ((err nil))
-    (cond ((simple-is-x-a-y? x y) :yes)
-	  ((setq err (incompatible? x y))
+   Y in the current context.  Returns :YES if X is known to be a Y,
+   :NO if X definitely cannot be a Y, and :MAYBE otherwise.  For the
+   :NO response, returns a second value, the split or negation link
+   that is causing the conflict."
+  (setq x (lookup-element-test x))
+  (setq y (lookup-element-test y))
+  (with-markers (m1)
+    (let ((err nil))
+      ;; Mark superiors of X with M1.
+      (upscan x m1)
+      (cond
+	;; If Y is explicitly NOT a superior due to a negation link,
+	;; the answer is :NO.  Return the negation link as the second
+	;; value.
+	((marker-on? y (get-cancel-marker m1))
+	 (values
+	  :no
+	  (find-is-not-a-link y m1)))
+	;; If Y is marked as a superior, the answer is :YES.
+	((marker-on? y m1)
+	 :yes)
+	;; If X and Y are on different branches of a split, the answer
+	;; is :NO.  Return the split as a second value.
+	((setq err (incompatible? x y))
 	   (values :no err))
-	  (t :maybe))))
+	;; Otherwise, the answer is :MAYBE.
+	(t :maybe)))))
+
+(defun find-is-not-a-link (node m1)
+  "NODE got tagged with a cancel-marker M1C during an upscan of
+   marker M1.  Find the is-not-a link responsible, or one of them if there are
+   more than one."
+  (dolist (link (incoming-b-elements node))
+    (when (and (is-not-a-link? link)
+	       (marker-on? (a-element link) m1))
+      (return-from find-is-not-a-link link))))
 
 (defun simple-is-x-eq-y? (x y)
   "Predicate to determine whether node X is known to be identical to
@@ -4783,16 +4810,47 @@ some conditions.  Examine and fix if necessary.")
       (marker-on? y m1))))
 
 (defun is-x-eq-y? (x y)
-  "Predicate to determine whether type or individual X is or can be EQ (identical) to
-   Y in the current context.  Returns :yes if X is known to be EQ to Y,:no
-   if X definitely cannot be EQ to Y, and :maybe otherwise.  For the :no
-   response, returns a second value, the split or superior type node
-   that is conflicted."
-  (let ((err nil))
-    (cond ((simple-is-x-eq-y? x y) :yes)
-	  ((setq err (incompatible? x y))
+  "Predicate to determine whether type or individual X is or can be
+   equal to Y in the current context.  Returns :YES if X is known to
+   be equal to Y, :NO if X definitely cannot be equal to Y, and :MAYBE
+   otherwise.  For the :NO response, returns a second value, the split
+   or negation link that is causing the conflict."
+  (setq x (lookup-element-test x))
+  (setq y (lookup-element-test y))
+  (with-markers (m1)
+    (let ((err nil))
+      ;; Mark equals of X with M1.
+      (eq-scan x m1)
+      (cond
+	;; If Y is explicitly NOT an equal due to a negation link,
+	;; the answer is :NO.  Return the negation link as the second
+	;; value.
+	((marker-on? y (get-cancel-marker m1))
+	 (values
+	  :forbidden
+	  (find-not-eq-link y m1)))
+	;; If Y is marked as equal, the answer is :YES.
+	((marker-on? y m1)
+	 :yes)
+	;; If X and Y are on different branches of a split, the answer
+	;; is :NO.  Return the split as a second value.
+	((setq err (incompatible? x y))
 	   (values :no err))
-	  (t :maybe))))  
+	;; Otherwise, the answer is :MAYBE.
+	(t :maybe)))))
+
+(defun find-not-eq-link (node m1)
+  "NODE got tagged with a cancel-marker M1C during an eq-scan of
+   marker M1.  Find the not-eq link responsible, or one of them if there are
+   more than one."
+  (dolist (link (incoming-b-elements node))
+    (when (and (not-eq-link? link)
+	       (marker-on? (a-element link) m1))
+      (return-from find-not-eq-link link)))
+  (dolist (link (incoming-a-elements node))
+    (when (and (not-eq-link? link)
+	       (marker-on? (b-element link) m1))
+      (return-from find-not-eq-link link))))  
 
 ;;; ========================================================================
 (subsection "Basic List and Show Machinery")
