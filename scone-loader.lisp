@@ -61,9 +61,9 @@
 (defun scone (&optional (version "scone-git"))
   (setq *version* version)
   (setq *default-kb-pathname* 
-    (format nil "/Users/sef/scone/~A/kb/anonymous.lisp"
+    (format nil "/Users/sef/Dropbox/Scone/~A/kb/anonymous.lisp"
 	    *version*))
-  (load (format nil "/Users/sef/scone/~A/engine"
+  (load (format nil "/Users/sef/Dropbox/Scone/~A/engine"
 		*version*))
   ;; If we're using a Scone engine that creates a separate scone package,
   ;; get into that package.
