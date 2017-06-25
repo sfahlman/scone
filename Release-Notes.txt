@@ -29,7 +29,7 @@ never been used, and keeping it all consistent has been a big extra
 drag on engine development.
 
 Modified IS-X-A-Y? and IS-X-EQ-Y? to return the proper second values,
-as documented in the Scone User's Guide..  That is, if the answer is
+as documented in the Scone User's Guide.  That is, if the answer is
 :NO due to a violated split or an explicit NOT-EQ link, return that
 split or link as the second value.  This is the item you should cancel
 if you want to force the answer to be :YES.
@@ -37,3 +37,12 @@ if you want to force the answer to be :YES.
 NOTE: There's a known bug here.  It appears that NOT-EQ links are not placing
 negation markers correctly.  This will be fixed soon.  I think that
 IS-NOT-A negation is now working as intended.
+
+June 25, 2017
+
+Some old changes from late 2016, not committed until now:
+
+Small update to add :SPLIT argument to INCOMING-WIRES.
+
+Change to add optional MARK-LINK arg to CROSS-REL, MARK-REL-INTERNAL,
+MARK-REL-DESCRIPTION.

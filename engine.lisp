@@ -4,7 +4,7 @@
 ;;;
 ;;; Author & Maintainer: Scott E. Fahlman
 ;;; ***************************************************************************
-;;; Copyright (C) 2003-2014, Carnegie Mellon University.
+;;; Copyright (C) 2003-2017, Carnegie Mellon University.
 ;;;
 ;;; The Scone software is made available to the public under the
 ;;; Apache 2.0 open source license.  A copy of this license is
@@ -18,7 +18,7 @@
 ;;; express or implied.  See the License for the specific language
 ;;; governing permissions and limitations under the License.
 ;;;
-;;; Development since February 2013 has been supported in part by the
+;;; Development Feb 2013 - Dec 2015 was supported in part by the
 ;;; U.S. Office of Naval Research under award number N000141310224.
 ;;;
 ;;; Development of Scone from January, 2012, through August 2013 was
@@ -42,6 +42,7 @@
 ;;; representing the official policies or endorsements, either
 ;;; expressed or implied, of IARPA, DoD/ARL, ONR, DARPA, the
 ;;; U.S. Government, or any of our other sponsors.
+;;;
 ;;; ***************************************************************************
 ;;; GENERAL STYLE NOTE: We want the runtime marker-scanning operations
 ;;; to be as fast as possible and to be non-consing.  So that code is
@@ -1352,7 +1353,8 @@
     (:b (incoming-b-wires e))
     (:c (incoming-c-wires e))
     (:parent (incoming-parent-wires e))
-    (:context (incoming-context-wires e))))
+    (:context (incoming-context-wires e))
+    (:split (incoming-split-wires e))))
 
 (defun connect-wire (wire-name from to &optional (may-defer nil))
   "Connect the wire specified by WIRE-NAME (:A, :PARENT, etc.) of
@@ -4526,9 +4528,10 @@ some conditions.  Examine and fix if necessary.")
   (when downscan (downscan-internal m :cross-map nil nil nil))
   (fast-marker-count m))
 
-(defmacro cross-rel (m-rel m-source m-target reverse)
+(defmacro cross-rel (m-rel m-source m-target reverse mark-link)
   "Cross REL-LINKs that are active and marked.  If REVERSE is T, cross
-   B-to-A; if NIL, cross A-to-B."
+   B-to-A; if NIL, cross A-to-B. If MARK-LINK is T, mark the link we
+   are crossing with M-TARGET, rather than the node on the other side."
   `(let* ((markable-mask
 	   ;; If *IGNORE-CONTEXT*, don't check for activation.
 	   (if *ignore-context* 0 *activation-mask*))
@@ -4549,17 +4552,22 @@ some conditions.  Examine and fix if necessary.")
 	 (when (and (fast-marker-on? link ,m-rel)
 		    (fast-statement? link)
 		    (fast-usable-element? link)
-		    (setq target (,(if reverse 'a-wire 'b-wire)
-				  link))
+		    ;; Decide what to mark, based on REVERSE and
+		    ;; MARK-LINK switches.
+		    (setq target
+			  ,(cond (mark-link 'link)
+				 (reverse '(a-wire link))
+				 (t '(b-wire link))))
 		    (fast-markable-element? target))
 	   (fast-mark target ,m-target))))))
 
-(defun mark-rel-internal (rel a m fwd rev
+(defun mark-rel-internal (rel a m fwd rev mark-link
 			      downscan augment recursion-allowance)
   "Internal function to put marker M on all elements E such that (if
    FWD) 'A REL E' and (if REV) 'E REL A'.  If DOWNSCAN, mark subtypes
    and instances of E.  If AUGMENT, do not clear M before doing this
-   operation."
+   operation. If MARK-LINK, put marker M on the relation link to
+   target node E, rather than the element E."
   (declare (fixnum recursion-allowance))
   (check-legal-marker-pair m)
   (unless augment (clear-marker-pair m))
@@ -4580,15 +4588,16 @@ some conditions.  Examine and fix if necessary.")
       (mark a m-a)
       (upscan-internal m-a :no-map nil nil nil)
       ;; Cross any marked rel-links A-to-B.
-      (when fwd (cross-rel m-rel m-a m nil))
+      (format t "MARK-LINK: ~S~%" mark-link)
+      (when fwd (cross-rel m-rel m-a m nil mark-link))
       ;; Cross any marked rel-links B-to-A.
-      (when rev (cross-rel m-rel m-a m t))
+      (when rev (cross-rel m-rel m-a m t mark-link))
       ;; Now explore the descriptions in which A plays a role.
       (unless (<= recursion-allowance 0)
 	(do-marked (source m-a)
 	  ;; Look for map-nodes marked with M-A.
 	  (when (fast-map-node? source)
-	    (mark-rel-description source m m-rel fwd rev
+	    (mark-rel-description source m m-rel fwd rev mark-link
 				  downscan recursion-allowance))))
       ;; Final eq-scan or downscan of M.
       (when (> (fast-marker-count m) 0)
@@ -4597,8 +4606,8 @@ some conditions.  Examine and fix if necessary.")
 	    (eq-scan nil m :augment t)))))
   (fast-marker-count m))
 
-(defun mark-rel-description (source m m-rel fwd rev downscan
-				    recursion-allowance)
+(defun mark-rel-description (source m m-rel fwd rev mark-link
+			     downscan recursion-allowance)
   "Function called within MARK-REL-INTERNAL to explore
    descriptions. May recurse, up to limits set by the allowance
    variables."
@@ -4616,9 +4625,9 @@ some conditions.  Examine and fix if necessary.")
 	  (mark source m-source)
 	  (upscan-internal m-source :gate-map m-desc nil nil)
 	  ;; Cross any marked rel-links A-to-B.
-	  (when fwd (cross-rel m-rel m-source m-target nil))
+	  (when fwd (cross-rel m-rel m-source m-target nil mark-link))
 	  ;; Cross any marked rel-links B-to-A.
-	  (when rev (cross-rel m-rel m-source m-target t))
+	  (when rev (cross-rel m-rel m-source m-target t mark-link))
 	  ;; Now recursively explore any descriptions in which SOURCE
 	  ;; plays a role.
 	  (unless (<= recursion-allowance 0)
@@ -4627,7 +4636,7 @@ some conditions.  Examine and fix if necessary.")
 	      (when (and (not (eq map source))
 			 (fast-map-node? map))
 		(mark-rel-description map m-target m-rel
-				      fwd rev downscan
+				      fwd rev mark-link downscan
 				      (- recursion-allowance 1)))))
 	  ;; Now eq-scan or downscan M-TARGET with M-DESC as focus.
 	  (if downscan
@@ -4670,8 +4679,10 @@ some conditions.  Examine and fix if necessary.")
     ;; If the REL argument is an english name with an
     ;; :INVERSE-RELATION tag, we do the inverse operation.
     (if (eq tag :inverse-relation)
-	(mark-rel-internal rel a m nil t downscan augment recursion-allowance)
-	(mark-rel-internal rel a m t nil downscan augment recursion-allowance))))
+	(mark-rel-internal rel a m nil t nil
+			   downscan augment recursion-allowance)
+	(mark-rel-internal rel a m t nil nil
+			   downscan augment recursion-allowance))))
 
 (defun mark-rel-inverse
     (rel a m
@@ -4691,8 +4702,10 @@ some conditions.  Examine and fix if necessary.")
     ;; If the REL argument is an english name with an
     ;; :INVERSE-RELATION tag, we do the forward operation.
     (if (eq tag :inverse-relation)
-	(mark-rel-internal rel a m t nil downscan augment recursion-allowance)
-	(mark-rel-internal rel A m nil t downscan augment recursion-allowance))))
+	(mark-rel-internal rel a m t nil nil
+			   downscan augment recursion-allowance)
+	(mark-rel-internal rel A m nil t nil
+			   downscan augment recursion-allowance))))
 
 (to-do
  "Consider whether we need to implement a description allowance for
