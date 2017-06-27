@@ -37,8 +37,8 @@ if you want to force the answer to be :YES.
 NOTE: There's a known bug here.  It appears that NOT-EQ links are not placing
 negation markers correctly.  This will be fixed soon.  I think that
 IS-NOT-A negation is now working as intended.
-
-June 25, 2017
+=======================================
+June 27, 2017
 
 Some old changes from late 2016, not committed until now:
 
@@ -46,3 +46,35 @@ Small update to add :SPLIT argument to INCOMING-WIRES.
 
 Change to add optional MARK-LINK arg to CROSS-REL, MARK-REL-INTERNAL,
 MARK-REL-DESCRIPTION.
+
+New changes:
+
+MARK-REL and MARK-REL-INVERSE (and the things that call them,
+including the SHOW and LIST versions and STATEMENT-TRUE?) have now
+been modified to handle transitive relations/statements properly.
+
+The changes were mostly in the MARK-REL-INTERNAL function.  This now
+follows chains of transitive statements and also handles transitive
+statements inherited from above, within the limits set by the
+RECURSION-ALLOWANCE arg.  So if, in a {family}, the mother is older
+than any child, then this will be inherited by the mother and children
+in any specific family, and that can be part of an older-than chain.
+
+I'm pushing this out now as the "development" version because one
+group of students needs this capability ASAP for a project they are
+working on.  But this facility needs some further testing and the
+documents need to be updated.
+
+There is one known (but minor) bug in the way that forward and inverse
+English names are assigned. Also, transitivity is not yet implemented
+for roles, just for Scone relations/statements.
+
+Also, there probably are more efficient ways to implement this if
+that ever becomes a priority. (It will be a priority for the
+transitive is-part-of relation, but in the near future that will
+become a built-in link type with its own machinery, as we have done
+with is-a links.
+
+
+
+

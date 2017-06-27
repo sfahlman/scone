@@ -2569,7 +2569,7 @@
    provide a :PARENT element for the relation itself.  Optionally set
    the :SYMMETRIC and :TRANSITIVE properties of the relation.  These
    refer to the relation from A to B.  The :ENGLISH argument, as
-   usual, is the name of the role (or set of names) in the forward
+   usual, is the name of the relation (or set of names) in the forward
    direction.  The :INVERSE argument is similar in form, but in the
    reverse direction."
   (unless (and iname
@@ -4250,7 +4250,7 @@ some conditions.  Examine and fix if necessary.")
 		       (flags-set 0)
 		       (flags-clear 0))
   "M is a marker.  MUST-BE-SET and MUST-BE-CLEAR are lists of markers
-   indicated by name or by number.  Scan all elements in the current
+   indicated by name or by number.  Scan all elements i(scone)n the current
    context.  If an element has all the MUST-BE-SET bits on and all the
    MUST-BE-CLEAR bits off, set marker M on that element.  If supplied
    the FLAGS-SET and FLAGS-CLEAR are integer masks indicating which
@@ -4551,20 +4551,19 @@ some conditions.  Examine and fix if necessary.")
 		      x))
 	 (when (and (fast-marker-on? link ,m-rel)
 		    (fast-statement? link)
-		    (fast-usable-element? link)
-		    ;; Decide what to mark, based on REVERSE and
-		    ;; MARK-LINK switches.
-		    (setq target
-			  ,(cond (mark-link 'link)
-				 (reverse '(a-wire link))
-				 (t '(b-wire link))))
-		    (fast-markable-element? target))
-	   (fast-mark target ,m-target))))))
+		    (fast-usable-element? link))
+	   ;; Decide what to mark: the link itself, its B-element, or its A-element.
+	   (setq target (cond (,mark-link link)
+			      (,reverse (a-wire link))
+			      (t (b-wire link))))
+	   ;; Check and mark it.
+	   (when (fast-markable-element? target)
+	     (fast-mark target m)))))))
 
 (defun mark-rel-internal (rel a m fwd rev mark-link
 			      downscan augment recursion-allowance)
   "Internal function to put marker M on all elements E such that (if
-   FWD) 'A REL E' and (if REV) 'E REL A'.  If DOWNSCAN, mark subtypes
+   FWD) 'A REL E' and (if REV) 'E REL A'. If DOWNSCAN, mark subtypes
    and instances of E.  If AUGMENT, do not clear M before doing this
    operation. If MARK-LINK, put marker M on the relation link to
    target node E, rather than the element E."
@@ -4580,35 +4579,52 @@ some conditions.  Examine and fix if necessary.")
     (setq rev t))
   ;; Allocate the markers.
   (with-markers (m-a m-rel)
-    (progn
-      ;; Do a full downscan from REL using M-REL.
-      (downscan rel m-rel)
-      ;; Simple upscan from A using M-A.  Mark map-nodes but
-      ;; do not cross them.
-      (mark a m-a)
-      (upscan-internal m-a :no-map nil nil nil)
-      ;; Cross any marked rel-links A-to-B.
-      (format t "MARK-LINK: ~S~%" mark-link)
-      (when fwd (cross-rel m-rel m-a m nil mark-link))
-      ;; Cross any marked rel-links B-to-A.
-      (when rev (cross-rel m-rel m-a m t mark-link))
-      ;; Now explore the descriptions in which A plays a role.
-      (unless (<= recursion-allowance 0)
-	(do-marked (source m-a)
-	  ;; Look for map-nodes marked with M-A.
-	  (when (fast-map-node? source)
-	    (mark-rel-description source m m-rel fwd rev mark-link
-				  downscan recursion-allowance))))
-      ;; Final eq-scan or downscan of M.
-      (when (> (fast-marker-count m) 0)
-	(if downscan
-	    (downscan nil m :augment t)
-	    (eq-scan nil m :augment t)))))
+    (prog ((transitive (fast-transitive? rel))
+	   ;; Element most recently marked with M. Might be NIL.
+	   (prev-marked-element (svref *last-marked-element* m)))
+       ;; Do a full downscan from REL using M-REL.
+       (downscan rel m-rel)
+       ;; Execute the body below here at least once, and potentially
+       ;; loop back here if the relation is transitive.
+       TRANSITIVE-LOOP
+       ;; Simple upscan from A using M-A.  Mark map-nodes but
+       ;; do not cross them.
+       (mark a m-a)
+       (upscan-internal m-a :no-map nil nil nil)
+       ;; Cross any marked rel-links A-to-B.
+       (when fwd (cross-rel m-rel m-a m nil mark-link))
+       ;; Cross any marked rel-links B-to-A.
+       (when rev (cross-rel m-rel m-a m t mark-link))
+       ;; Now explore the descriptions in which A plays a role.
+       (unless (<= recursion-allowance 0)
+	 (do-marked (source m-a)
+	   ;; Look for map-nodes marked with M-A.
+	   (when (fast-map-node? source)
+	     (mark-rel-description source m m-rel fwd rev mark-link
+				   downscan recursion-allowance))))
+       ;; Final eq-scan or downscan of M.
+       (when (> (fast-marker-count m) 0)
+	 (if downscan
+	     (downscan nil m :augment t)
+	     (eq-scan nil m :augment t)))
+       ;; If REL is a transitive relation, and if there are any newly
+       ;; M-marked nodes we have not yet processed, pick the first of
+       ;; these, make it the new A node, and jump back to
+       ;; TRANSITIVE-LOOP. Iterate until there are no more new ones.
+       (when (and transitive
+		  (not (eq prev-marked-element
+			   (svref *last-marked-element* m))))
+	 (if prev-marked-element
+	     (setq a (svref (next-marked-element prev-marked-element) m))
+	     (setq a (svref *first-marked-element* m)))
+	 (setq prev-marked-element a)
+	 (clear-marker-pair m-a)
+	 (go TRANSITIVE-LOOP))))
   (fast-marker-count m))
 
 (defun mark-rel-description (source m m-rel fwd rev mark-link
 			     downscan recursion-allowance)
-  "Function called within MARK-REL-INTERNAL to explore
+  "Function called within MARK-REL-INTERNAL to explore inherited
    descriptions. May recurse, up to limits set by the allowance
    variables."
   (declare (fixnum recursion-allowance))
@@ -4706,13 +4722,6 @@ some conditions.  Examine and fix if necessary.")
 			   downscan augment recursion-allowance)
 	(mark-rel-internal rel A m nil t nil
 			   downscan augment recursion-allowance))))
-
-(to-do
- "Consider whether we need to implement a description allowance for
-   MARK-REL and friends.")
-
-(to-do
- "Add scans for transitive relations.")
 
 ;;; ========================================================================
 (subsection "Context Activation")
@@ -6802,7 +6811,6 @@ English Names: ~20T~10:D
     (unless *defer-unknown-connections*
       (error "Element ~S is not (yet) defined." target))
     (push (list tag source target) *deferred-connections*)))
-
 
 ;;; ***************************************************************************
 (section "KB Checkpointing and Persistence")
