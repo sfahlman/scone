@@ -1590,7 +1590,8 @@
   ;; specified here.  If the parent is anything else, this redefinition
   ;; is an error, which will be caught in MAKE-ELEMENT.
   (let ((this-element (lookup-element iname)))
-    (when (and (eq (parent-wire this-element) *undefined-thing*)
+    (when (and this-element
+	       (eq (parent-wire this-element) *undefined-thing*)
 	       (not (incompatible? this-element parent)))
       ;; The element exists, but its parent is {undefined thing}. 
       (disconnect-wire :parent this-element)
@@ -1884,7 +1885,8 @@
   ;; specified here.  If the parent is anything else, this redefinition
   ;; is an error, which will be caught in MAKE-ELEMENT.
   (let ((this-element (lookup-element iname)))
-    (when (and (eq (parent-wire this-element) *undefined-thing*)
+    (when (and this-element
+	       (eq (parent-wire this-element) *undefined-thing*)
 	       (not (incompatible? this-element parent)))
       ;; The element exists, but its parent is {undefined thing}. 
       (disconnect-wire :parent this-element)
@@ -2411,6 +2413,12 @@
 		  english)
   "Make and return a new SPLIT-NODE with the specified members.
    Optionally provide :INAME and :CONTEXT."
+  ;; Test whether MEMBERS already have elements in common, violating
+  ;; the proposed split.  If so, signal an error."
+  (let ((violations (list-split-violations members)))
+    (when violations
+      (error "Proposed new split already has overlapping members: ~S~%"
+	     violations)))
   ;; Try to make a meaningful iname, mentioning the first two members
   ;; in the split.
   (unless iname
@@ -2453,11 +2461,9 @@
   (connect-wire :split split new-item)
   split)
 
-
 ;;; A COMPLETE-SPLIT is a subtype of split.  We note the superclass of the
 ;;; split as a property in the COMPLETE-SPLIT element.  The COMPLETE-SPLIT
 ;;; completely partitiions this type.
-
 (defconstant complete-split-mask (logior split-flag complete-split-flag))
 
 (defmacro fast-complete-split? (e)
@@ -2479,6 +2485,12 @@
    all under the specified SUPERTYPE.  Optionally provide :INAME and
    :CONTEXT."
   (setq supertype (lookup-element-or-defer supertype))
+  ;; Test whether MEMBERS already have elements in common, violating
+  ;; the proposed split.  If so, signal an error."
+  (let ((violations (list-split-violations members)))
+    (when violations
+      (error "Proposed new complete split already has overlapping members: ~S~%"
+	     violations)))
   ;; Try to make a meaningful iname, mentioning the first two members
   ;; in the split.
   (unless iname
@@ -2514,7 +2526,10 @@
       (connect-wire :split s m))
     s))
 
-;;; ========================================================================
+
+
+
+  ;;; ========================================================================
 (subsection "Relations")
 
 ;;; A RELATION element creates a new relation that we can instantiate with
@@ -4250,7 +4265,7 @@ some conditions.  Examine and fix if necessary.")
 		       (flags-set 0)
 		       (flags-clear 0))
   "M is a marker.  MUST-BE-SET and MUST-BE-CLEAR are lists of markers
-   indicated by name or by number.  Scan all elements i(scone)n the current
+   indicated by name or by number.  Scan all elements in the current
    context.  If an element has all the MUST-BE-SET bits on and all the
    MUST-BE-CLEAR bits off, set marker M on that element.  If supplied
    the FLAGS-SET and FLAGS-CLEAR are integer masks indicating which
@@ -5259,12 +5274,12 @@ some conditions.  Examine and fix if necessary.")
        m1 :n n :all all :last last
        :heading (format nil "In intersection of ~A:" superiors)))))
 
-(defun mark-lowermost (m1 m2)
+(defun mark-lowermost (m1 m2 &key (augment nil))
   "From the set of elements currently marked with M1, look for those that
    have no immediate descendants marked with M1.  Mark these with M2."
   (check-legal-marker-pair m1)
   (check-legal-marker-pair m2)
-  (clear-marker-pair m2)
+  (unless augment (clear-marker-pair m2))
   (do-marked (x m1)
     (when (lowermost? x m1)
       (fast-mark x m2)))
@@ -5291,12 +5306,12 @@ some conditions.  Examine and fix if necessary.")
        m1 :n n :all all :last last
        :heading "Lowermost marked elements:"))))
 
-(defun mark-uppermost (m1 m2)
+(defun mark-uppermost (m1 m2 &key (augment nil))
   "From the set of elements currently marked with M1, look for those that
    have no parents marked with M1.  Mark these with M2."
   (check-legal-marker-pair m1)
   (check-legal-marker-pair m2)
-  (clear-marker-pair m2)
+  (unless augment (clear-marker-pair m2))
   (do-marked (x m1)
     (when (uppermost? x m1)
       (fast-mark x m2)))
@@ -5322,6 +5337,141 @@ some conditions.  Examine and fix if necessary.")
       (show-marked
        m1 :n n :all all :last last
        :heading "Uppermost marked elements:"))))
+
+;;; These mark/list/show functions find violations of splits or
+;;; complete splits in the network -- that is, situations where some
+;;; element is below two different branches of the split or proposed
+;;; split.
+
+;;; Normally these situations will never occur if the network is built
+;;; in the customary order, in which new splits are created before the
+;;; various types being split are populated with subtypes and
+;;; instances.  Split violation is tested when each new is-a link is
+;;; added to the network.  However, importing KBs from other sources
+;;; can result in scrambling the order in which splits are created, so
+;;; we need to test for existing violations at the time when we create
+;;; a new split, and perhaps at other times.
+
+(defun mark-split-violations (s m &key (augment nil))
+  "S is either a split-element or a list of nodes that we plan to
+   split. Check whether there are any elements that violate that
+   split.  That is, are there any nodes (type or individual) in in the
+   currently-active context that are inferiors of more than one branch
+   of the split.  Mark all violators with marker M.
+
+   If :AUGMENT is T, add to the current M-marked set rather than
+   clearing M at the start.
+
+   Return the number of nodes that are marked with M."
+  ;; Check and clear marker M.
+  (check-legal-marker-pair m)
+  (unless augment (clear-marker-pair m))
+  ;; Turn S into a list of elements that are or will be split,
+  ;; unless it is a list already.
+  (unless (listp s)
+    (setq s (lookup-element-test s))
+    (unless (fast-split? s)
+      (error "~S is not a split." s))
+    (setq s (split-wires s)))
+  ;; Only do this check if there are at least two elements in the split-set.
+  (when (>= (length s) 2)
+    ;; Get markers needed for this search.
+    (with-markers (m1 m2 m3)
+      (progn
+	;; Mark all nodes below the first element with M1.
+	(downscan (car s) m1)
+	;; Loop over all other elements E in S looking for a problem.
+	(dolist (e (cdr s))
+	  ;; Mark all elements below E with M2.
+	  (downscan e m2)
+	  ;; For all elements with M1 and M2 set, add M3.
+	  (mark-boolean m3 (list m1 m2) ())
+	  ;; Turn all M2 markers into M1.  We test subsequent Es against
+	  ;; ALL previously-marked nodes.  And then, iterate down the
+	  ;; list.
+	  (convert-marker m2 m1))
+	;; Convert the uppermost M3 markers (if any) to M markers.
+	(mark-uppermost m3 m :augment t))
+      (commentary
+       "Not enough markers available, unable to check for existing split violators.")))
+  ;; Return the marker-count for M.
+  (marker-count m))
+
+(defun list-split-violations (s)
+  "S is either a split-element or a list of member-elements for a
+   proposed split.  Return a list of all uppermost elements that
+   violate this split in the current context.  These are elements that
+   appear under more than one of types being split."
+  (with-markers (m)
+    (progn
+      (mark-split-violations s m)
+      (list-marked m))))
+
+(defun show-split-violations (s &key
+			      (n 100)
+			      (all nil)
+			      (last nil))
+  "S is either a split-element or a list of member-elements for a
+   proposed split.  Sho all the uppermost elements that violate this
+   split in the current context.  These are elements that appear under
+   more than one of types being split."
+  (with-markers (m)
+    (progn
+      (mark-split-violations s m)
+      (if (= 0 (marker-count m))
+	  (format t "No split violations. ~%")
+	  (show-marked
+	   m :n n :all all :last last
+	   :heading (format nil "Split violations under ~A:" s))))))
+
+(defun mark-all-split-violations (m)
+  "Scan all splits in the current context.  For each, do MARK-SPLIT-VIOLATIONS
+   with AUGMENT to mark all uppermost violators in this context, if any.  Return
+   the number of M-marked nodes."
+  (check-legal-marker-pair m)
+  (clear-marker m)
+  ;; Get a marker MS and mark all the split elements in the current context.
+  (with-markers (ms)
+    (progn
+      (downscan *split* ms)
+      ;; For each MS-marked split X, do MARK-SPLIT-VIOLATIONS, leaving marker
+      ;; M on all uppermost violators.  Do this with AUGMENT NIL so that we
+      ;; collect violators from all the splits.
+      (do-marked (x ms)
+	(when (split? x)
+	  (mark-split-violations x m :augment t)))
+      ;; Return the marker-count for M.  If all is well, this is 0.
+      (marker-count m))
+    (commentary
+     "Not enough markers available, unable to check for all split violations.")))
+
+(defun list-all-split-violations ()
+  "Return a list of all uppermost elements that violate any split in
+   the current context. If NIL, no violations exist."
+  (with-markers (m)
+    (progn
+      (mark-all-split-violations m)
+      (list-marked m))))
+
+(defun show-all-split-violations (s &key
+			      (n 100)
+			      (all nil)
+			      (last nil))
+  "Show all the uppermost elements that violate any
+   split in the current context, if any violations exist."
+  (with-markers (m)
+    (progn
+      (mark-all-split-violations m)
+      (if (= 0 (marker-count m))
+	  (format t "No split violations. ~%")
+	  (show-marked
+	   m :n n :all all :last last
+	   :heading (format nil "Split violations under ~A:" s))))))
+
+
+
+;;; %%% DEPRECATE OR FIX THESE. We need to find a more intuitive way to
+;;; separate useful answers from non-useful ones.
 
 (defun good-answer? (e)
   "Given an element E, determine if it would be a good answer to a
@@ -5389,9 +5539,6 @@ some conditions.  Examine and fix if necessary.")
     (progn 
       (mark-lowermost m1 m-lower)
       (mark-answers m-lower m2 :strict strict))))
-
-
-;;; %%% DEPRECATE THESE.
 
 (defun acceptable-role-filler (m)
   "From the set of nodes currently marked with M, find the one that
@@ -6758,7 +6905,7 @@ English Names: ~20T~10:D
 			   *default-kb-pathname*))
 	 (*load-kb-stream* (open pathname
 				 :direction :input
-				 :external-format :utf8))
+				 :external-format :utf-8))
 	 ;; When reading a KB file, set this variable.
 	 (*loading-kb-file* t)
 	 ;; The file may set *DEFER-UNKNOWN-CONNECTIONS*.  Make sure that
@@ -6837,7 +6984,7 @@ English Names: ~20T~10:D
     (with-open-file (dump pathname
 			  :direction :output
 			  :if-exists :supersede
-			  :external-format :utf8)
+			  :external-format :utf-8)
       (format dump "~&;;; Scone Checkpoint File ~A~%" pathname)
       (format dump ";;; Dumped on ~A.~2%" (current-time-string))
       (format dump "(setq *defer-unknown-connections* t)~%")
@@ -6862,7 +7009,7 @@ English Names: ~20T~10:D
     (with-open-file (dump pathname
 			  :direction :output
 			  :if-exists :supersede
-			  :external-format :utf8)
+			  :external-format :utf-8)
       (format dump ";;; Scone New-Element Checkpoint File ~A~%" pathname)
       (format dump ";;; Dumped on ~A.~2%" (current-time-string))
       (format dump "(setq *defer-unknown-connections* t)~%")

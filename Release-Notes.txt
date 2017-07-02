@@ -46,7 +46,7 @@ Small update to add :SPLIT argument to INCOMING-WIRES.
 
 Change to add optional MARK-LINK arg to CROSS-REL, MARK-REL-INTERNAL,
 MARK-REL-DESCRIPTION.
-
+---------------------------------
 New changes:
 
 MARK-REL and MARK-REL-INVERSE (and the things that call them,
@@ -74,7 +74,46 @@ that ever becomes a priority. (It will be a priority for the
 transitive is-part-of relation, but in the near future that will
 become a built-in link type with its own machinery, as we have done
 with is-a links.
+==========================================
+June 29, 2017
 
+Made a change in NEW-INDV and NEW-TYPE, requested by Daniel Gross, to
+check whether an element with a give iname actually exists before
+comparing to *undefined-thing*.  This was not a problem in SBCL, but
+tripped up in LispWorks.
+
+Changed all instances in the engine of :UTF8 to :UTF-8, which is
+apparently the form that most CL implmenetations recognize.
+
+===========================================
+July 1, 2017
+
+Added MARK-SPLIT-VIOLATIONS to check whether an existing or proposed
+split S has violations under it in the current context -- that is,
+some element S is under more than one of the branches of the split S.
+If so, mark them and return the count.
+
+Also, MARK-ALL-SPLIT-VIOLATIONS calls MARK-SPLIT-VIOLATIONS on every
+split present in the current context, testing them all for violations.
+
+Modified NEW-SPLIT and NEW-COMPLETE-SPLIT to use these if necessary.
+
+Added LIST and SHOW versions of the two MARK-functions above.
+
+There are various ways in which these functions could be speeded up.
+However, we normally check for split violations incrementally, when
+new is-a links are added to the network. The problem arises when we
+already have populated the various type-nodes being split with
+subtypes and instances and then add the split later -- then we need to
+check if this is OK.
+
+Note that this does not come up in the common Scone idiom of using
+NEW-SPLIT-SUBTYPES to create new types and a split, all in the same
+operation. We need this now because some programs that convert
+existing KBs into Scone, for example from OWL, scrmable up the order
+in which things are done.
+
+============================================
 
 
 
