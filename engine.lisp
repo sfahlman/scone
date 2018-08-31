@@ -4768,6 +4768,43 @@ some conditions.  Examine and fix if necessary.")
     (activation-scan *context-marker* *activation-marker*)
     e))
 
+(defvar *base-context-marker* -1
+  "Marker permanently assigned to mark the base *CONTEXT* node (which is assumed
+   to always be relevant) and its superiors.")
+(declaim (type fixnum *base-context-marker*))
+(defun base-context-marker-setup ()
+  (setq *base-context-marker* (get-marker))
+  (lock-marker *base-context-marker*)
+  (let ((*ignore-context* t))
+    (upscan *general* *base-context-marker*)))
+
+(defun modify-context (c func)
+  "Apply FUNC to all elements in contexts associated with C (except for
+   {general})"
+  (with-markers (m)
+    (progn
+      (let ((*ignore-context* t))
+        (upscan c m))
+      (do-marked (c *base-context-marker*)
+          (faster-unmark c m))
+      (do-marked (context m)
+        (funcall func context *context-marker*)
+        (dolist (e (incoming-context-wires context))
+          (funcall func e *activation-marker*))))))
+
+(defun change-context (e)
+  "E is an element representing a context.  Activate it as the current
+   context, assuming that E is a sub-context of {general}
+
+   Be sure to run BASE-CONTEXT-MARKER-SETUP first before calling this"
+  ;; Activate context E.
+  (setq e (lookup-element-test e))
+  (unless (eq *context* e)
+    (modify-context *context* #'fast-unmark)
+    (setq *context* e)
+    (modify-context *context* #'fast-mark)
+    e))
+
 (defun refresh-context ()
   "Keep the current *context*, butforce and update the context and
    activation markers in case something got messed up."
