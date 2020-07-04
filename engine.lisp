@@ -235,6 +235,14 @@
    defined type and adds the element to that type, comment on this via
    COMMENTARY.")
 
+(defvar *comment-on-rule-check* nil
+  "When Scone checks if rules are satisfied, comment on this via
+   COMMENTARY.")
+
+(defvar *comment-on-redundant-links* nil
+  "When Scone detects that a new IS-A or EQ link is redundant,
+   comment on this via COMMENTARY.")
+
 ;;; ========================================================================
 (subsection "Variables That Control Printing and Naming")
 
@@ -391,6 +399,12 @@
 
 (defvar *last-element* nil
   "Last element in the chain of all elements in the KB.")
+
+;;; ========================================================================
+(subsection "Production System Variables")
+
+(defvar *rules* nil
+  "List of active rules to check.")
 
 ;;; ========================================================================
 (subsection "Variables Linking to Essential Scone Elements")
@@ -2070,9 +2084,14 @@
    B wires.  Optionally provide :PARENT and :CONTEXT."
   (setq a (lookup-element-or-defer a))
   (setq b (lookup-element-or-defer b))
-  (unless (or *no-kb-error-checking* negate dummy
-	      (not (incompatible? a b)))
-    (error "~S cannot be a ~S." a b))
+  ;; Check if A is already a B or cannot be a B.
+  (unless (or *no-kb-error-checking* negate dummy)
+    (case (is-x-a-y? a b)
+      (:yes
+       (when *comment-on-redundant-links*
+         (commentary "Not adding redundant is-a between ~S and ~S." a b))
+       (return-from new-is-a nil))
+      (:no (error "~S cannot be a ~S." a b))))
   ;; Try to create a human-readable iname.
   (unless iname
     (setq iname
@@ -2173,9 +2192,14 @@
    wires.  Optionally provide :PARENT and :CONTEXT."
   (setq a (lookup-element-or-defer a))
   (setq b (lookup-element-or-defer b))
-  (unless (or *no-kb-error-checking* negate dummy
-	      (not (incompatible? a b)))
-    (error "~S cannot be eq to ~S." a b))
+  ;; Check if A is already eq to B or cannot be eq to B.
+  (unless (or *no-kb-error-checking* negate dummy)
+    (case (is-x-eq-y? a b)
+      (:yes
+       (when *comment-on-redundant-links*
+         (commentary "Not adding redundant eq between ~S and ~S." a b))
+       (return-from new-eq nil))
+      (:no (error "~S cannot be eq to ~S." a b))))
   ;; Try to create a human-readable iname.
   (unless iname
     (setq iname
@@ -2804,6 +2828,8 @@
 	(check-defined-type-memberships ax)
 	(check-defined-type-memberships bx)
 	(when cx (check-defined-type-memberships cx))
+        ;; Check if any rules are now satisfied.
+        (check-rule-x-y-z ax rel bx)
 	new-link))))
 
 
@@ -3478,6 +3504,185 @@
       ((not (and next (fast-map-node? next)))
        (if (fast-role-node? next) next nil))))
 
+;;; ========================================================================
+(subsection "Production Rules")
+
+(defstruct (rule
+            (:constructor internal-make-rule))
+  "Structure to hold data about production rules."
+  ;; Starts as a list of symbols representing variables in the rule.
+  ;; Will have Scone elements substituted in for the symbols to indicate
+  ;; that those elements can possibly satisfy the rule.
+  (vars nil :type list)
+  ;; List of two-element lists (X Y) representing predicate X is a Y.
+  (is-a-pred nil :type list)
+  ;; List of three-element lists (X Y Z).
+  ;; If Y is a role-node, this represents predicate X is a Y of Z.
+  ;; If Y is a relation-node, this represents predicate statement-true X Y Z.
+  (x-y-z-pred nil :type list)
+  ;; Function with VARS as the argument list.
+  (action nil))
+
+(defmacro new-rule (vars
+                    &key x-is-a-y
+                         x-y-z
+                         action)
+  "Macro to define new rules.
+   VARS is a list of symbols used in the rule.
+   If :X-IS-A-Y is specified, it contains all two-element IS-A predicates.
+   If :X-IS-A-Y-OF-Z is specified, it contains all three-element X-Y-Z predicates.
+   :ACTION must be specified and contains the code to run if the rule
+   is satisfied."
+  (let ((r (gensym))
+        (x (gensym)))
+    `(let ((,r (internal-make-rule
+                :vars ',vars
+                :is-a-pred ',x-is-a-y
+                :x-y-z-pred ',x-y-z
+                :action (lambda ,vars ,action))))
+       (push ,r *rules*)
+       ;; For each X-Y-Z predicate, attach a trigger for this rule to
+       ;; node Y.
+       (dolist (,x ',x-y-z)
+         (push-element-property (lookup-element-test (second ,x))
+                                :rule-triggers
+                                (list ,r (first ,x) (third ,x))))
+       ;; For each IS-A predicate, attach a trigger for this rule to
+       ;; node Y. Note: currently not checking these triggers.
+       (dolist (,x ',x-is-a-y)
+         (push-element-property (lookup-element-test (second ,x))
+                                :rule-triggers
+                                (list ,r (first ,x))))
+       ,r)))
+
+(defun substitute-in-rule (e var r)
+  "Internal helper function to substitute an element for a variable in rule R.
+   Also removes predicates that have no more variables after substituting
+   if they are true.
+   Returns the new rule, or NIL if substituting makes a predicate false."
+  ;; Substitutes E for VAR in each predicate in PRED, then checks if the
+  ;; predicate violates TEST.
+  (flet ((simplify (pred test)
+           (let ((substituted (mapcar (lambda (x) (substitute e var x)) pred))
+                 (simplified nil))
+             (dolist (x substituted simplified)
+               (cond ((not (and
+                            (lookup-element (first x))
+                            (lookup-element (car (last x)))))
+                      (push x simplified))
+                     ((not (apply test x))
+                      (return-from substitute-in-rule nil))))))
+         ;; Checks what type of node Y is and applies the appropriate test.
+         (x-y-z-test (x y z)
+           (cond ((indv-role-node? y)
+                  (simple-is-x-eq-y? x (the-x-role-of-y y z)))
+                 ((type-role-node? y)
+                  (simple-is-x-a-y? x (the-x-role-of-y y z)))
+                 ((relation? y)
+                  (statement-true? x y z)))))
+    (internal-make-rule
+     :vars (substitute e var (rule-vars r))
+     :is-a-pred (simplify (rule-is-a-pred r) 'simple-is-x-a-y?)
+     :x-y-z-pred (simplify (rule-x-y-z-pred r) #'x-y-z-test)
+     :action (rule-action r))))
+
+(defun check-rule-x-y-z (x y z)
+  "Function to check if any rules are newly satisfied after adding
+   role statement X is the Y of Z or relation statement X Y Z."
+  (when *comment-on-rule-check*
+    (commentary "Check rule x-y-z ~S ~S ~S." x y z))
+  (with-markers (m)
+    (progn
+      ;; Mark all superiors of Y to check triggers on them.
+      (upscan y m)
+      (do-marked (superior m)
+        (when (role-node? superior)
+          (dolist (trigger (get-element-property superior :rule-triggers))
+            (let* ((r (first trigger))
+                   (a (second trigger))
+                   (c (third trigger))
+                   (left (lookup-element a))
+                   (right (lookup-element c)))
+              (if left
+                  ;; Element is on left, variable is on right.
+                  (when (simple-is-x-eq-y? x left)
+                    (check-rule-filler r z c))
+                  (if right
+                      ;; Variable is on left, element is on right.
+                      (when (simple-is-x-eq-y? z right)
+                        (check-rule-filler r x a))
+                      ;; Variable is on left and right.
+                      (check-rule-filler r x a z c))))))))))
+
+(defun check-rule-x-is-a-y (x y)
+  "WIP, currently unused."
+  (when *comment-on-rule-check*
+    (commentary t "Check rule ~S is a ~S." x y))
+  (with-markers (m)
+    (progn
+      (upscan y m)
+      (do-marked (superior m)
+        (unless (role-node? superior)
+          (dolist (trigger (get-element-property superior :rule-triggers))
+            (check-rule-filler (first trigger) x (second trigger))))))))
+
+(defun check-rule-filler (r e var &optional e2 var2)
+  "Function to check if rule R can be satisfied if E is substituted
+   for VAR, and if specified E2 is substituted for VAR2."
+  (when *comment-on-rule-check*
+    (commentary "Check rule filler ~a ~S ~S ~S ~S." r e var e2 var2))
+  (cond ((null (setq r (substitute-in-rule e var r)))
+         (return-from check-rule-filler nil))
+        ((and e2 var2 (null (setq r (substitute-in-rule e2 var2 r))))
+         (return-from check-rule-filler nil))
+        (t (check-rule r))))
+
+(defun check-rule (r)
+  "Function to check if rule R can be satisfied in the network."
+  (when *comment-on-rule-check*
+    (commentary "Checking rule ~a." r))
+  (when (null (rule-x-y-z-pred r))
+    (if (null (rule-is-a-pred r))
+        (progn
+          ;; This COMMENTARY actually isn't that useful, since it only
+          ;; shows the rule after already substituting variables.
+          (when *comment-on-rule-check*
+            (commentary "Rule true ~a." r))
+          (apply (rule-action r) (rule-vars r))
+          (return-from check-rule r))
+        (return-from check-rule nil)))
+  (dolist (x (rule-x-y-z-pred r))
+    (let ((left (lookup-element (first x)))
+          (e (lookup-element-test (second x)))
+          (right (lookup-element (third x))))
+      (cond ((and left
+                  (null right))
+             ;; Left element is filled, scan for possible right elements.
+             (with-markers (m)
+               (progn
+                 (cond ((role-node? e)
+                        (mark-role-inverse e left m)
+                        (do-marked (y m)
+                          (unless (role-node? y)
+                            (check-rule-filler r y (third x)))))
+                       ((relation? e)
+                        (mark-rel e left m)
+                        (do-marked (y m)
+                          (check-rule-filler r y (third x))))))))
+            ((and (null left)
+                  right)
+             ;; Right element is filled, scan for possible left elements.
+             (with-markers (m)
+               (progn
+                 (cond ((role-node? e)
+                        (mark-role e right m)
+                        (do-marked (y m)
+                          (unless (role-node? y)
+                            (check-rule-filler r y (first x)))))
+                       ((relation? e)
+                        (mark-rel-inverse e right m)
+                        (do-marked (y m)
+                          (check-rule-filler r y (first x))))))))))))
 
 ;;; ***************************************************************************
 (section "Marker Operations and Scans")
@@ -4413,38 +4618,38 @@ some conditions.  Examine and fix if necessary.")
       (upscan e2 m2)
       ;; Examine whether the cancel marker of M1 is on any M2-marked node.
       (do-marked (forbidden (get-cancel-marker m1))
-	(when (fast-marker-on? forbidden m2)
-	  ;; We found a problem, return the conflicted node.
-	  (return-from incompatible? forbidden)))
+        (when (fast-marker-on? forbidden m2)
+          ;; We found a problem, return the conflicted node.
+          (return-from incompatible? forbidden)))
       ;; And vice versa.
       (do-marked (forbidden (get-cancel-marker m2))
-	(when (fast-marker-on? forbidden m1)
-	  ;; We found a problem, return nil and the forbidden node.
-	  (return-from incompatible? forbidden)))
+        (when (fast-marker-on? forbidden m1)
+          ;; We found a problem, return nil and the forbidden node.
+          (return-from incompatible? forbidden)))
       ;; Check for violated splits.
       (let
-	  ;; Set up some masks to check whether the split is active and
-	  ;; not cancelled.
-	  ((markable-mask
-	    ;; If *IGNORE-CONTEXT*, don't check for activation of the split.
-	    (if *ignore-context* 0 *activation-mask*))
-	   (blocking-mask (logior *context-cancel-mask*
-				  *activation-cancel-mask*
-				  (marker-bit (get-cancel-marker m1))
-				  (marker-bit (get-cancel-marker m2)))))
-	(declare (fixnum markable-mask blocking-mask))
-	;; Scan all M1-marked elements.
-	(do-marked (e m1)
-	  ;; For each, scan the splits of which it is a part.
-	  (dolist (split (incoming-split-wires e))
-	    ;; If the split is active and not cancelled...
-	    (when (fast-usable-element? split)
-	      ;; See if M2 is on some other item in the split.
-	      (dolist (item (split-wires split))
-		(when (and (fast-marker-on? item m2)
-			   (not (eq item e)))
-		  ;; Report the violated split, if any.
-		  (return-from incompatible? split))))))))))
+          ;; Set up some masks to check whether the split is active and
+          ;; not cancelled.
+          ((markable-mask
+             ;; If *IGNORE-CONTEXT*, don't check for activation of the split.
+             (if *ignore-context* 0 *activation-mask*))
+           (blocking-mask (logior *context-cancel-mask*
+                                  *activation-cancel-mask*
+                                  (marker-bit (get-cancel-marker m1))
+                                  (marker-bit (get-cancel-marker m2)))))
+        (declare (fixnum markable-mask blocking-mask))
+        ;; Scan all M1-marked elements.
+        (do-marked (e m1)
+          ;; For each, scan the splits of which it is a part.
+          (dolist (split (incoming-split-wires e))
+            ;; If the split is active and not cancelled...
+            (when (fast-usable-element? split)
+              ;; See if M2 is on some other item in the split.
+              (dolist (item (split-wires split))
+                (when (and (fast-marker-on? item m2)
+                           (not (eq item e)))
+                  ;; Report the violated split, if any.
+                  (return-from incompatible? split))))))))))
 
 ;; Occasionally useful utility, provided by Cinar.
 
@@ -6034,8 +6239,11 @@ English Names: ~20T~10:D
       (commentary
        "~S cannot be the ~S of ~S.  Continuing..." x y z)
       (return-from x-is-the-y-of-z nil)))
-  (let ((role-node (the-x-role-of-y y z)))
-    (new-eq role-node x)))
+  (let ((eq-link (new-eq x (the-x-role-of-y y z))))
+    (when eq-link
+      ;; Check if any rules are now satisfied.
+      (check-rule-x-y-z x y z))
+    eq-link))
 
 (defun fixup-role-filler (x y z)
   "We want to add a value X to the Y role of Z, but Z does not have a
@@ -6063,8 +6271,11 @@ English Names: ~20T~10:D
       (commentary
        "~S cannot be a ~S of ~S.  Continuing..." x y z)
       (return-from x-is-a-y-of-z nil)))
-  (let ((role-node (the-x-role-of-y y z)))
-    (new-is-a x role-node)))
+  (let ((is-a-link (new-is-a x (the-x-role-of-y y z))))
+    (when is-a-link
+      ;; Check if any rules are now satisfied.
+      (check-rule-x-y-z x y z))
+    is-a-link))
 
 (defun the-x-of-y-is-a-z (x y z)
   "Find or create the node for the X of Y.  Then, if it is legal to do so,
