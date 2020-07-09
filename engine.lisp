@@ -2117,6 +2117,8 @@
     ;; If A is now a member of some defined class, create an IS-A link
     ;; to that class.
     (check-defined-type-memberships a)
+    ;; Check if any rules are now satisfied.
+    (check-rule-x-is-a-y a b)
     link))
 
 ;;; An IS-NOT-A-LINK Indicates an exception: A is NOT a B, and any
@@ -2214,16 +2216,18 @@
     (declare (fixnum flags))
     (when dummy (setq flags (logior flags kill-flag)))
     (let ((link (make-element flags
-			   iname parent context a b nil
-			   english nil nil nil nil)))
-    ;; Create derived links if necessary.
-    (unless no-supplement
-      (add-derived-links-eq link))
-    ;; See whether A is now a member of a defined class.
-    (check-defined-type-memberships a)
-    ;; It's not necessary to check B unless :negate is on.
-    (when negate (check-defined-type-memberships a))
-    link)))
+                              iname parent context a b nil
+                              english nil nil nil nil)))
+      ;; Create derived links if necessary.
+      (unless no-supplement
+        (add-derived-links-eq link))
+      ;; See whether A is now a member of a defined class.
+      (check-defined-type-memberships a)
+      ;; It's not necessary to check B unless :negate is on.
+      (when negate (check-defined-type-memberships a))
+      ;; Check if any rules are now satisfied.
+      (check-rule-x-is-a-y a b)
+      link)))
 
 
 ;;; NOT-EQ-LINK Indicates that elements A and B do NOT represent the same
@@ -2718,6 +2722,10 @@
    :NEGATE is present, this is the negation of the statement that
    would otherwise be created.  If :A, :B, or :C is :CREATE, create a
    new node representing that role."
+  (when (statement-true? a rel b)
+    (when *comment-on-redundant-links*
+      (commentary "Not creating redundant statement ~S ~S ~S" a rel b))
+    (return-from new-statement nil))
   ;; The relation must already be present.  No deferrals.
   (multiple-value-bind (element tag)
       (lookup-element rel)
@@ -3596,7 +3604,8 @@
       ;; Mark all superiors of Y to check triggers on them.
       (upscan y m)
       (do-marked (superior m)
-        (when (role-node? superior)
+        (when (or (role-node? superior)
+                  (relation? superior))
           (dolist (trigger (get-element-property superior :rule-triggers))
             (let* ((r (first trigger))
                    (a (second trigger))
@@ -3615,9 +3624,10 @@
                       (check-rule-filler r x a z c))))))))))
 
 (defun check-rule-x-is-a-y (x y)
-  "WIP, currently unused."
+  "Function to check if any rules are newly satisfied after adding
+   an IS-A or EQ link between X and Y."
   (when *comment-on-rule-check*
-    (commentary t "Check rule ~S is a ~S." x y))
+    (commentary "Check rule ~S is a ~S." x y))
   (with-markers (m)
     (progn
       (upscan y m)
@@ -3651,38 +3661,38 @@
           (apply (rule-action r) (rule-vars r))
           (return-from check-rule r))
         (return-from check-rule nil)))
-  (dolist (x (rule-x-y-z-pred r))
-    (let ((left (lookup-element (first x)))
-          (e (lookup-element-test (second x)))
-          (right (lookup-element (third x))))
-      (cond ((and left
-                  (null right))
-             ;; Left element is filled, scan for possible right elements.
-             (with-markers (m)
-               (progn
-                 (cond ((role-node? e)
-                        (mark-role-inverse e left m)
-                        (do-marked (y m)
-                          (unless (role-node? y)
-                            (check-rule-filler r y (third x)))))
-                       ((relation? e)
-                        (mark-rel e left m)
-                        (do-marked (y m)
-                          (check-rule-filler r y (third x))))))))
-            ((and (null left)
-                  right)
-             ;; Right element is filled, scan for possible left elements.
-             (with-markers (m)
-               (progn
-                 (cond ((role-node? e)
-                        (mark-role e right m)
-                        (do-marked (y m)
-                          (unless (role-node? y)
-                            (check-rule-filler r y (first x)))))
-                       ((relation? e)
-                        (mark-rel-inverse e right m)
-                        (do-marked (y m)
-                          (check-rule-filler r y (first x))))))))))))
+  (let* ((pred (car (rule-x-y-z-pred r)))
+         (left (lookup-element (first pred)))
+         (e (lookup-element-test (second pred)))
+         (right (lookup-element (third pred))))
+    (cond ((and left
+                (null right))
+           ;; Left element is filled, scan for possible right elements.
+           (with-markers (m)
+             (progn
+               (cond ((role-node? e)
+                      (mark-role-inverse e left m)
+                      (do-marked (y m)
+                        (unless (role-node? y)
+                          (check-rule-filler r y (third pred)))))
+                     ((relation? e)
+                      (mark-rel e left m)
+                      (do-marked (y m)
+                        (check-rule-filler r y (third pred))))))))
+          ((and (null left)
+                right)
+           ;; Right element is filled, scan for possible left elements.
+           (with-markers (m)
+             (progn
+               (cond ((role-node? e)
+                      (mark-role e right m)
+                      (do-marked (y m)
+                        (unless (role-node? y)
+                          (check-rule-filler r y (first pred)))))
+                     ((relation? e)
+                      (mark-rel-inverse e right m)
+                      (do-marked (y m)
+                        (check-rule-filler r y (first pred)))))))))))
 
 ;;; ***************************************************************************
 (section "Marker Operations and Scans")
