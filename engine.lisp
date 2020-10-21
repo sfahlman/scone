@@ -241,7 +241,8 @@
 
 (defvar *comment-on-redundant-links* nil
   "When Scone detects that a new IS-A or EQ link is redundant,
-   comment on this via COMMENTARY.")
+   comment on this via COMMENTARY.
+   NOTE: remove when merging with actual redundant link code.")
 
 ;;; ========================================================================
 (subsection "Variables That Control Printing and Naming")
@@ -2084,7 +2085,8 @@
    B wires.  Optionally provide :PARENT and :CONTEXT."
   (setq a (lookup-element-or-defer a))
   (setq b (lookup-element-or-defer b))
-  ;; Check if A is already a B or cannot be a B.
+  ;; Check if A is already a B or cannot be a B. TODO: Remove when merging with actual
+  ;; redundant link code.
   (unless (or *no-kb-error-checking* negate dummy)
     (case (is-x-a-y? a b)
       (:yes
@@ -2194,7 +2196,8 @@
    wires.  Optionally provide :PARENT and :CONTEXT."
   (setq a (lookup-element-or-defer a))
   (setq b (lookup-element-or-defer b))
-  ;; Check if A is already eq to B or cannot be eq to B.
+  ;; Check if A is already eq to B or cannot be eq to B. TODO: Remove when merging with actual
+  ;; redundant link code.
   (unless (or *no-kb-error-checking* negate dummy)
     (case (is-x-eq-y? a b)
       (:yes
@@ -2722,6 +2725,7 @@
    :NEGATE is present, this is the negation of the statement that
    would otherwise be created.  If :A, :B, or :C is :CREATE, create a
    new node representing that role."
+  ;; TODO: Remove when merging with actual redundant link code.
   (when (statement-true? a rel b)
     (when *comment-on-redundant-links*
       (commentary "Not creating redundant statement ~S ~S ~S" a rel b))
@@ -3522,76 +3526,159 @@
   ;; Will have Scone elements substituted in for the symbols to indicate
   ;; that those elements can possibly satisfy the rule.
   (vars nil :type list)
-  ;; List of two-element lists (X Y) representing predicate X is a Y.
-  (is-a-pred nil :type list)
+  ;; List of lists (X Y1 Y2 ...) representing X is a Y1 and a Y2 and etc.
+  (is-a-preds nil :type list)
   ;; List of three-element lists (X Y Z).
   ;; If Y is a role-node, this represents predicate X is a Y of Z.
   ;; If Y is a relation-node, this represents predicate statement-true X Y Z.
-  (x-y-z-pred nil :type list)
+  (x-y-z-preds nil :type list)
   ;; Function with VARS as the argument list.
   (action nil))
 
-(defmacro new-rule (vars
-                    &key x-is-a-y
-                         x-y-z
-                         action)
+(defmacro new-rule (bindings x-y-z-preds &body body)
   "Macro to define new rules.
-   VARS is a list of symbols used in the rule.
-   If :X-IS-A-Y is specified, it contains all two-element IS-A predicates.
-   If :X-IS-A-Y-OF-Z is specified, it contains all three-element X-Y-Z predicates.
-   :ACTION must be specified and contains the code to run if the rule
-   is satisfied."
-  (let ((r (gensym))
-        (x (gensym)))
-    `(let ((,r (internal-make-rule
-                :vars ',vars
-                :is-a-pred ',x-is-a-y
-                :x-y-z-pred ',x-y-z
-                :action (lambda ,vars ,action))))
-       (push ,r *rules*)
-       ;; For each X-Y-Z predicate, attach a trigger for this rule to
-       ;; node Y.
-       (dolist (,x ',x-y-z)
-         (push-element-property (lookup-element-test (second ,x))
-                                :rule-triggers
-                                (list ,r (first ,x) (third ,x))))
-       ;; For each IS-A predicate, attach a trigger for this rule to
-       ;; node Y. Note: currently not checking these triggers.
-       (dolist (,x ',x-is-a-y)
-         (push-element-property (lookup-element-test (second ,x))
-                                :rule-triggers
-                                (list ,r (first ,x))))
-       ,r)))
+   BINDINGS is a list of variable and type bindings. Each element of BINDINGS
+   can be either a symbol, representing a local variable, or a list where the
+   first element is a symbol and the remaining elements are Scone types that
+   any Scone element substituted for the variable must be a subtype of.
+   Note: It is (currently) up to the user to specify only types that cannot
+   be deduced from X-Y-Z-PREDS. The rule will still work if redundant
+   information is added, but performance may be hindered.
+   X-Y-Z-PREDS is a list of role or relation predicates. Each predicate must
+   be a three-element list (X Y Z), where Y is a role or relation node and
+   X and Z are either symbols or Scone elements.
+   BODY contains the forms to run if all the predicates are newly satisfied.
+   This means when there is some mapping from the variables to Scone elements
+   that satisfy all the bindings and X-Y-Z predicates, the elements are bound
+   to the variables and BODY is run."
+  (destructuring-bind (vars is-a-preds)
+      (loop for x in bindings
+            ;; Check if X is of the form (SYM E1 E2 ...).
+            if (listp x)
+            ;; Make sure the first element SYM is a symbol.
+            unless (symbolp (car x)) do (error "~S is not a symbol." (car x)) end
+            ;; Add SYM to the list VARS.
+            and collect (car x) into vars
+            ;; Make sure E1, E2, ... are all Scone elements, then
+            ;; add the whole list (SYM E1 E2 ...) to the list IS-A-PREDS.
+            and if (> (length x) 1)
+            collect (cons (car x)
+                          (mapcar (lambda (e) (or (lookup-element e)
+                                                  (error "~S is not a Scone element" e)))
+                                  (cdr x)))
+            into is-a-preds end
+            ;; Check if X is of the form SYM.
+            else
+            ;; Make sure SYM is a symbol.
+            unless (symbolp x) do (error "~S is not a symbol." x) end
+            ;; Add SYM to the list VARS.
+            and collect x into vars
+            end ; End if (listp x).
+            ;; Check if VARS contains duplicate variables.
+            finally (unless (equal vars (remove-duplicates vars))
+                      (error "~S contains duplicate symbols." vars))
+            ;; Return both VARS and IS-A-PREDS
+            (return (list vars is-a-preds)))
+    (let ((is-a-triggers
+            ;; IS-A-PREDS is of the form ((SYM1 E1-1 E1-2 ...) (SYM2 E2-1 E2-2 ...) ...).
+            ;; Transform it to the form ((SYM1 E1-1) (SYM1 E1-2) ... (SYM2 E2-1) (SYM2 E2-2) ...)
+            (mapcan (lambda (preds)
+                      (mapcar (lambda (e) (list (car preds) e)) (cdr preds))) is-a-preds))
+          (x-y-z-triggers
+            ;; Check that X-Y-Z-PREDS has the form ((X1 Y1 Z1) (X2 Y2 Z2) ...) where
+            ;; each X and Z are either symbols or Scone elements and each Y is a
+            ;; role or relation node.
+            ;; Currently doesn't check that all symbols are scoped in VARS.
+            (mapcar (lambda (pred)
+                      (unless (= (length pred) 3)
+                        (error "~S does not have length 3" pred))
+                      (destructuring-bind (x y z) pred
+                        (unless (or (symbolp x) (setq x (lookup-element x)))
+                          (error "~S is not a symbol or Scone element." (first pred)))
+                        (unless (or (symbolp z) (setq z (lookup-element z)))
+                          (error "~S is not a symbol or Scone element." (third pred)))
+                        (unless (or (role-node? y) (relation? y))
+                          (error "~S is not a role or relation node." y))
+                        (list x (lookup-element y) z)))
+                    x-y-z-preds))
+          (r (gensym))
+          (x (gensym)))
+      `(let ((,r (internal-make-rule
+                  :vars ',vars
+                  :is-a-preds ',is-a-preds
+                  :x-y-z-preds ',x-y-z-preds
+                  :action (lambda ,vars (progn ,@body)))))
+         ;; Push rule to global rules list.
+         (push ,r *rules*)
+         ;; For each X-Y-Z predicate, attach a trigger for this rule to node Y.
+         ;; Each trigger looks like (R X Z) where R is this rule and X and Z are
+         ;; variables or Scone elements.
+         (dolist (,x ',x-y-z-triggers)
+           (push-element-property (second ,x)
+                                  :rule-triggers
+                                  (list ,r (first ,x) (third ,x))))
+         ;; For each IS-A predicate, attach a trigger for this rule to node Y.
+         ;; Each trigger looks like (R SYM) where R is this rule and SYM is a variable.
+         (dolist (,x ',is-a-triggers)
+           (push-element-property (second ,x)
+                                  :rule-triggers
+                                  (list ,r (first ,x))))
+         ;; Return created rule
+         ,r))))
 
 (defun substitute-in-rule (e var r)
   "Internal helper function to substitute an element for a variable in rule R.
    Also removes predicates that have no more variables after substituting
    if they are true.
    Returns the new rule, or NIL if substituting makes a predicate false."
-  ;; Substitutes E for VAR in each predicate in PRED, then checks if the
-  ;; predicate violates TEST.
-  (flet ((simplify (pred test)
-           (let ((substituted (mapcar (lambda (x) (substitute e var x)) pred))
-                 (simplified nil))
-             (dolist (x substituted simplified)
-               (cond ((not (and
-                            (lookup-element (first x))
-                            (lookup-element (car (last x)))))
-                      (push x simplified))
-                     ((not (apply test x))
-                      (return-from substitute-in-rule nil))))))
-         ;; Checks what type of node Y is and applies the appropriate test.
-         (x-y-z-test (x y z)
-           (cond ((indv-role-node? y)
-                  (simple-is-x-eq-y? x (the-x-role-of-y y z)))
-                 ((type-role-node? y)
-                  (simple-is-x-a-y? x (the-x-role-of-y y z)))
-                 ((relation? y)
-                  (statement-true? x y z)))))
+  ;; PREDS is a list where each element is of the form (SYM E1 E2 ... EN).
+  ;; If VAR equals SYM, SIMPLIFY-IS-A-PREDS checks if E is a subtype of all E1,...,EN.
+  (flet ((simplify-is-a-preds (preds)
+           ;; Temporary variable to store all predicates not involving VAR.
+           (let ((simplified nil))
+             ;; Iterate through PREDS, return SIMPLIFIED at the end.
+             (dolist (pred preds simplified)
+               (if (eq var (car pred))
+                   ;; Case when VAR matches SYM.
+                   (with-markers (m)
+                     (progn
+                       (upscan e m)
+                       ;; Predicate is not satisfied, return NIL to outer function.
+                       (unless (every (lambda (e2) (fast-marker-on? e2 m))
+                                      (cdr pred))
+                         (return-from substitute-in-rule))))
+                   ;; Case when VAR doesn't match SYM, don't throw away PRED.
+                   (push pred simplified)))))
+         ;; PREDS is a list where each element is of the form (X Y Z).
+         ;; X and Z are either symbols or variables, Y is a role node or a relation node.
+         ;; SIMPLIFY-X-Y-Z-PREDS checks if all predicates are satisfied after substitution.
+         (simplify-x-y-z-preds (preds)
+           ;; Temporary variable to store all predicates after substituting and
+           ;; removing ones with no more variables.
+           (let ((simplified nil))
+             ;; Iterate through PREDS, return SIMPLIFIED at the end.
+             (dolist (pred preds simplified)
+               (let* ((substituted (substitute e var pred))
+                      (x (first substituted))
+                      (y (second substituted))
+                      (z (third substituted)))
+                 (cond ((or (symbolp x) (symbolp z))
+                        ;; If either X or Z are still variables, don't throw away PRED.
+                        (push substituted simplified))
+                       ((or
+                         ;; This predicate is not satisfied, return NIL to outer function.
+                         (and (indv-role-node? y)
+                              (not (simple-is-x-eq-y? x (the-x-role-of-y y z))))
+                         (and (type-role-node? y)
+                              (not (simple-is-x-a-y? x (the-x-role-of-y y z))))
+                         (and (relation? y)
+                              (not (statement-true? x y z))))
+                        (return-from substitute-in-rule nil))))))))
+    ;; Return rule with the variable substituted and extraneous predicates removed.
     (internal-make-rule
      :vars (substitute e var (rule-vars r))
-     :is-a-pred (simplify (rule-is-a-pred r) 'simple-is-x-a-y?)
-     :x-y-z-pred (simplify (rule-x-y-z-pred r) #'x-y-z-test)
+     :is-a-preds (simplify-is-a-preds (rule-is-a-preds r))
+     :x-y-z-preds (simplify-x-y-z-preds (rule-x-y-z-preds r))
      :action (rule-action r))))
 
 (defun check-rule-x-y-z (x y z)
@@ -3607,20 +3694,29 @@
         (when (or (role-node? superior)
                   (relation? superior))
           (dolist (trigger (get-element-property superior :rule-triggers))
+            ;; Each trigger is of the form (R A C).
+            ;; R is a rule, A and C are either variables or elements.
+            ;; The trigger represents a predicate A Y C, and we want to see if
+            ;; X and Z can take the places of A and C.
             (let* ((r (first trigger))
                    (a (second trigger))
                    (c (third trigger))
-                   (left (lookup-element a))
-                   (right (lookup-element c)))
+                   (left (lookup-element a)) ; Will be NIL if A is not an element.
+                   (right (lookup-element c))) ; Will be NIL if C is not an element.
               (if left
                   ;; Element is on left, variable is on right.
+                  ;; This trigger can apply if X is a subtype of A.
                   (when (simple-is-x-eq-y? x left)
+                    ;; See if the rule can be satisfied by substituting Z for C.
                     (check-rule-filler r z c))
                   (if right
                       ;; Variable is on left, element is on right.
+                      ;; This trigger can apply if Z is a subtype of C.
                       (when (simple-is-x-eq-y? z right)
+                        ;; See if the rule can be satisfied by substituting X for A.
                         (check-rule-filler r x a))
                       ;; Variable is on left and right.
+                      ;; See if the rule can be satisfied by substituting X for A and Z for C.
                       (check-rule-filler r x a z c))))))))))
 
 (defun check-rule-x-is-a-y (x y)
@@ -3630,69 +3726,97 @@
     (commentary "Check rule ~S is a ~S." x y))
   (with-markers (m)
     (progn
+      ;; Mark all superiors of Y to check triggers on them.
       (upscan y m)
       (do-marked (superior m)
+        ;; Don't check role/relation triggers.
         (unless (role-node? superior)
+          ;; Each trigger is of the form (R SYM). R is a rule, SYM is a variable.
           (dolist (trigger (get-element-property superior :rule-triggers))
+            ;; See if the rule can be satisfied by substituting X for SYM in R.
             (check-rule-filler (first trigger) x (second trigger))))))))
 
 (defun check-rule-filler (r e var &optional e2 var2)
   "Function to check if rule R can be satisfied if E is substituted
-   for VAR, and if specified E2 is substituted for VAR2."
+   for VAR, and if specified E2 is substituted for VAR2. Mutually recursive
+   with CHECK-RULE to find additional elements to substitute."
   (when *comment-on-rule-check*
     (commentary "Check rule filler ~a ~S ~S ~S ~S." r e var e2 var2))
   (cond ((null (setq r (substitute-in-rule e var r)))
+         ;; If substituting E for VAR in R violates a predicate, return NIL.
          (return-from check-rule-filler nil))
         ((and e2 var2 (null (setq r (substitute-in-rule e2 var2 r))))
+         ;; If substituting E2 for VAR2 in R violates a predicate, return NIL.
          (return-from check-rule-filler nil))
+        ;; If no predicates are violated after substituting, start recursively
+        ;; finding more elements to substitute for variables.
         (t (check-rule r))))
 
 (defun check-rule (r)
-  "Function to check if rule R can be satisfied in the network."
+  "Function to check if rule R can be satisfied in the network. Mutually
+   recursive with CHECK-RULE-FILLER and finds more elements to substitute for
+   the variables in R."
   (when *comment-on-rule-check*
     (commentary "Checking rule ~a." r))
-  (when (null (rule-x-y-z-pred r))
-    (if (null (rule-is-a-pred r))
+  (when (null (rule-x-y-z-preds r))
+    ;; No more X-Y-Z predicates to satisfy in this rule.
+    (if (null (rule-is-a-preds r))
+        ;; No more is-a predicates to satisfy in this rule, so rule is true.
         (progn
           ;; This COMMENTARY actually isn't that useful, since it only
           ;; shows the rule after already substituting variables.
           (when *comment-on-rule-check*
             (commentary "Rule true ~a." r))
+          ;; The elements that satisfy rule R are now stored in its VARS field.
+          ;; Apply the rule action to those elements.
           (apply (rule-action r) (rule-vars r))
           (return-from check-rule r))
+        ;; If there are still is-a predicates, then there are variables unconnected
+        ;; to other X-Y-Z predicates. Treat this rule as ill-defined and return NIL.
         (return-from check-rule nil)))
-  (let* ((pred (car (rule-x-y-z-pred r)))
-         (left (lookup-element (first pred)))
-         (e (lookup-element-test (second pred)))
-         (right (lookup-element (third pred))))
+  ;; Look at the first X-Y-Z predicate to find elements to substitute in the rule.
+  (let* ((pred (car (rule-x-y-z-preds r)))
+         (left (lookup-element (first pred))) ; LEFT is either an element or NIL.
+         (y (lookup-element-test (second pred))) ; Y is either a role or relation node.
+         (right (lookup-element (third pred)))) ; RIGHT is either an element or NIL.
+    ;; PRED is of the form (X Y Z). LEFT is the element X if non-NIL, and RIGHT is
+    ;; the element Z if non-NIL.
     (cond ((and left
                 (null right))
            ;; Left element is filled, scan for possible right elements.
            (with-markers (m)
              (progn
-               (cond ((role-node? e)
-                      (mark-role-inverse e left m)
-                      (do-marked (y m)
-                        (unless (role-node? y)
-                          (check-rule-filler r y (third pred)))))
-                     ((relation? e)
-                      (mark-rel e left m)
-                      (do-marked (y m)
-                        (check-rule-filler r y (third pred))))))))
+               (cond ((role-node? y)
+                      (mark-role-inverse y left m)
+                      (do-marked (z m)
+                        (unless (role-node? z)
+                          ;; We know predicate LEFT is a Y of Z is true, so try substituting
+                          ;; element Z for variable Z in PRED.
+                          (check-rule-filler r z (third pred)))))
+                     ((relation? y)
+                      (mark-rel y left m)
+                      (do-marked (z m)
+                        ;; We know predicate statement LEFT Y Z is true, so try substituting
+                        ;; element Z for variable Z in PRED.
+                        (check-rule-filler r z (third pred))))))))
           ((and (null left)
                 right)
            ;; Right element is filled, scan for possible left elements.
            (with-markers (m)
              (progn
-               (cond ((role-node? e)
-                      (mark-role e right m)
-                      (do-marked (y m)
-                        (unless (role-node? y)
-                          (check-rule-filler r y (first pred)))))
-                     ((relation? e)
-                      (mark-rel-inverse e right m)
-                      (do-marked (y m)
-                        (check-rule-filler r y (first pred)))))))))))
+               (cond ((role-node? y)
+                      (mark-role y right m)
+                      (do-marked (x m)
+                        (unless (role-node? x)
+                          ;; We know predicate X is a Y of RIGHT is true, so try substituting
+                          ;; element X for variable X in PRED.
+                          (check-rule-filler r x (first pred)))))
+                     ((relation? y)
+                      (mark-rel-inverse y right m)
+                      (do-marked (x m)
+                        ;; We know predicate statement X Y RIGHT is true, so try substituting
+                        ;; element X for variable X in PRED.
+                        (check-rule-filler r x (first pred)))))))))))
 
 ;;; ***************************************************************************
 (section "Marker Operations and Scans")
