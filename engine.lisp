@@ -4,7 +4,7 @@
 ;;;
 ;;; Author & Maintainer: Scott E. Fahlman
 ;;; ***************************************************************************
-;;; Copyright (C) 2003-2017, Carnegie Mellon University.
+;;; Copyright (C) 2003-2021, Carnegie Mellon University.
 ;;;
 ;;; The Scone software is made available to the public under the
 ;;; Apache 2.0 open source license.  A copy of this license is
@@ -235,7 +235,7 @@
    defined type and adds the element to that type, comment on this via
    COMMENTARY.")
 
-(defvar *comment-on-rule-check* nil
+(defvar *comment-on-rule-check* t
   "When Scone checks if rules are satisfied, comment on this via
    COMMENTARY.")
 
@@ -3532,6 +3532,8 @@
   ;; If Y is a role-node, this represents predicate X is a Y of Z.
   ;; If Y is a relation-node, this represents predicate statement-true X Y Z.
   (x-y-z-preds nil :type list)
+  ;; List of variables that must be proper.
+  (proper-vars nil :type list)
   ;; Function with VARS as the argument list.
   (action nil))
 
@@ -3607,6 +3609,7 @@
                   :vars ',vars
                   :is-a-preds ',is-a-preds
                   :x-y-z-preds ',x-y-z-preds
+                  :proper-vars ',proper-vars
                   :action (lambda ,vars (progn ,@body)))))
          ;; Push rule to global rules list.
          (push ,r *rules*)
@@ -3617,14 +3620,68 @@
            (push-element-property (second ,x)
                                   :rule-triggers
                                   (list ,r (first ,x) (third ,x))))
-         ;; For each IS-A predicate, attach a trigger for this rule to node Y.
-         ;; Each trigger looks like (R SYM) where R is this rule and SYM is a variable.
+         ;; For each IS-A predicate (X Y), attach a trigger for this rule to node Y.
+         ;; Each trigger looks like (R X) where R is this rule and X is a variable.
          (dolist (,x ',is-a-triggers)
            (push-element-property (second ,x)
                                   :rule-triggers
                                   (list ,r (first ,x))))
          ;; Return created rule
          ,r))))
+
+(defmacro new-if-needed-rule (bindings x-y-z-preds x-y-z-action)
+  "Macro to define if-needed (lazy) rules.
+   BINDINGS is a list of variable bindings with optional keywords :PROPER and :SUPERIOR.
+   :PROPER T specifies that only proper Scone nodes can be substituted for the variable.
+   :SUPERIOR E specifies that only inferiors of E can be substituted for the variable.
+   X-Y-Z-PREDS is a list of role and/or relation predicates.
+   X-Y-Z-ACTION is a role or relation action in the form of a list (X Y Z).
+   X is an expression that can use variables in BINDINGS and evaluates to
+   some Scone element. Y is a role or relation node. Z is one of the variables
+   in BINDINGS or a Scone element."
+  (let* ((vars nil)
+         (proper-vars nil)
+         (is-a-preds nil)
+         (r (gensym))
+         (action-y (second x-y-z-action))
+         ;; Determine if Y is an indv-role, type-role, or relation and
+         ;; pick an appropriate action function.
+         (action-function (cond ((indv-role-node? action-y)
+                                 'x-is-the-y-of-z)
+                                ((type-role-node? action-y)
+                                 'x-is-a-y-of-z)
+                                ((relation? action-y)
+                                 'new-statement)
+                                (t (error "~S is not a role or relation." action-y)))))
+    ;; Parse BINDINGS.
+    (dolist (x bindings)
+      (if (listp x)
+          (cond ((null x)
+                 (error "Empty binding in new-lazy-rule."))
+                ((not (symbolp (car x)))
+                 (error "~S is not a symbol." (car x)))
+                ;; Parse :PROPER and :SUPERIOR keyword arguments.
+                (t (destructuring-bind (var &key proper superior) x
+                     (push var vars)
+                     (when proper
+                       (push var proper-vars))
+                     (when (lookup-element superior)
+                       (push (list var superior) is-a-preds)))))
+          (push x vars)))
+    `(let ((,r (internal-make-rule
+                :vars ',vars
+                :is-a-preds ',is-a-preds
+                :x-y-z-preds ',x-y-z-preds
+                :proper-vars ',proper-vars
+                :action (lambda ,vars (,action-function ,@x-y-z-action)))))
+       (push ,r *rules*)
+       ;; Add a trigger to the role or relation Y.
+       ;; Each trigger looks like (R Z) where R is this rule and Z is a
+       ;; variable or Scone element.
+       (push-element-property (lookup-element ,action-y)
+                              :lazy-rule-triggers
+                              (list ,r (third ',x-y-z-action)))
+       ,r)))
 
 (defun substitute-in-rule (e var r)
   "Internal helper function to substitute an element for a variable in rule R.
@@ -3679,6 +3736,7 @@
      :vars (substitute e var (rule-vars r))
      :is-a-preds (simplify-is-a-preds (rule-is-a-preds r))
      :x-y-z-preds (simplify-x-y-z-preds (rule-x-y-z-preds r))
+     :proper-vars (rule-proper-vars r)
      :action (rule-action r))))
 
 (defun check-rule-x-y-z (x y z)
@@ -3736,12 +3794,27 @@
             ;; See if the rule can be satisfied by substituting X for SYM in R.
             (check-rule-filler (first trigger) x (second trigger))))))))
 
+(defun check-rule-x-of-y (x y)
+  "Function to check if there are any lazy rules that can be used to find
+   the X of Y if there is currently no good answer."
+  (when *comment-on-rule-check*
+    (commentary "Check rule ~S of ~S." x y))
+  (with-markers (m)
+    (progn
+      ;; Mark all superiors of X to check lazy triggers on them.
+      (upscan x m)
+      (do-marked (superior m)
+        ;; Each trigger is of the form (R SYM). R is a rule, SYM is a variable
+        ;; representing the parent node Y.
+        (dolist (trigger (get-element-property superior :lazy-rule-triggers))
+          (check-rule-filler (first trigger) y (second trigger)))))))
+
 (defun check-rule-filler (r e var &optional e2 var2)
   "Function to check if rule R can be satisfied if E is substituted
    for VAR, and if specified E2 is substituted for VAR2. Mutually recursive
    with CHECK-RULE to find additional elements to substitute."
   (when *comment-on-rule-check*
-    (commentary "Check rule filler ~a ~S ~S ~S ~S." r e var e2 var2))
+    (commentary "Check rule filler ~S ~S ~S ~S ~S." r e var e2 var2))
   (cond ((null (setq r (substitute-in-rule e var r)))
          ;; If substituting E for VAR in R violates a predicate, return NIL.
          (return-from check-rule-filler nil))
@@ -3757,7 +3830,7 @@
    recursive with CHECK-RULE-FILLER and finds more elements to substitute for
    the variables in R."
   (when *comment-on-rule-check*
-    (commentary "Checking rule ~a." r))
+    (commentary "Checking rule ~S." r))
   (when (null (rule-x-y-z-preds r))
     ;; No more X-Y-Z predicates to satisfy in this rule.
     (if (null (rule-is-a-preds r))
@@ -3766,11 +3839,11 @@
           ;; This COMMENTARY actually isn't that useful, since it only
           ;; shows the rule after already substituting variables.
           (when *comment-on-rule-check*
-            (commentary "Rule true ~a." r))
+            (commentary "Rule true ~S." r))
           ;; The elements that satisfy rule R are now stored in its VARS field.
           ;; Apply the rule action to those elements.
-          (apply (rule-action r) (rule-vars r))
-          (return-from check-rule r))
+          ;; Return the result of applying the action. (Return value not used.)
+          (return-from check-rule (apply (rule-action r) (rule-vars r))))
         ;; If there are still is-a predicates, then there are variables unconnected
         ;; to other X-Y-Z predicates. Treat this rule as ill-defined and return NIL.
         (return-from check-rule nil)))
@@ -3784,39 +3857,45 @@
     (cond ((and left
                 (null right))
            ;; Left element is filled, scan for possible right elements.
-           (with-markers (m)
+           (with-markers (m1)
              (progn
-               (cond ((role-node? y)
-                      (mark-role-inverse y left m)
-                      (do-marked (z m)
-                        (unless (role-node? z)
-                          ;; We know predicate LEFT is a Y of Z is true, so try substituting
-                          ;; element Z for variable Z in PRED.
-                          (check-rule-filler r z (third pred)))))
-                     ((relation? y)
-                      (mark-rel y left m)
-                      (do-marked (z m)
-                        ;; We know predicate statement LEFT Y Z is true, so try substituting
-                        ;; element Z for variable Z in PRED.
-                        (check-rule-filler r z (third pred))))))))
+               ;; Create temporary marker M2 for scanning.
+               (with-markers (m2)
+                 (progn
+                   (cond ((role-node? y)
+                          (mark-role-inverse y left m2))
+                         ((relation? y)
+                          (mark-rel y left m2)))
+                   ;; Mark most specific elements to search as rule fillers.
+                   ;; Only mark proper elements if declared that way in rule.
+                   (if (member (third pred) (rule-proper-vars r))
+                       (mark-proper m2 m1)
+                       (mark-most-specific m2 m1))))
+               (do-marked (z m1)
+                 ;; We know role/relation predicate (LEFT Y Z) is true, so try substituting
+                 ;; element Z for variable Z in PRED.
+                 (check-rule-filler r z (third pred))))))
           ((and (null left)
                 right)
            ;; Right element is filled, scan for possible left elements.
-           (with-markers (m)
+           (with-markers (m1)
              (progn
-               (cond ((role-node? y)
-                      (mark-role y right m)
-                      (do-marked (x m)
-                        (unless (role-node? x)
-                          ;; We know predicate X is a Y of RIGHT is true, so try substituting
-                          ;; element X for variable X in PRED.
-                          (check-rule-filler r x (first pred)))))
-                     ((relation? y)
-                      (mark-rel-inverse y right m)
-                      (do-marked (x m)
-                        ;; We know predicate statement X Y RIGHT is true, so try substituting
-                        ;; element X for variable X in PRED.
-                        (check-rule-filler r x (first pred)))))))))))
+               ;; Create temporary marker M2 for scanning.
+               (with-markers (m2)
+                 (progn
+                   (cond ((role-node? y)
+                          (mark-role y right m2))
+                         ((relation? y)
+                          (mark-rel-inverse y right m2)))
+                   ;; Mark most specific elements to search as rule fillers.
+                   ;; Only mark proper elements if declared that way in rule.
+                   (if (member (first pred) (rule-proper-vars r))
+                       (mark-proper m2 m1)
+                       (mark-most-specific m2 m1))))
+               (do-marked (z m1)
+                 ;; We know role/relation predicate (X Y RIGHT) is true, so try substituting
+                 ;; element X for variable X in PRED.
+                 (check-rule-filler r z (first pred)))))))))
 
 ;;; ***************************************************************************
 (section "Marker Operations and Scans")
@@ -6184,7 +6263,14 @@ English Names: ~20T~10:D
     (progn
       (mark-role x y m1 :downscan nil)
       (mark-most-specific m1 m2)
-      (any-good-answer? m2))))
+      (or (any-good-answer? m2)
+          ;; If no good answer, try running rule engine and
+          ;; check for good answers again.
+          (progn
+            (check-rule-x-of-y x y)
+            (mark-role x y m1 :downscan nil)
+            (mark-most-specific m1 m2)
+            (any-good-answer? m2))))))
 
 (defun list-all-x-of-y (x y)
   "Return a list with all X of Y."
