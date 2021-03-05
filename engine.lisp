@@ -3537,15 +3537,53 @@
   ;; Function with VARS as the argument list.
   (action nil))
 
-(defmacro new-rule (bindings x-y-z-preds &body body)
+(defun validate-rule-spec (bindings x-y-z-preds)
+  (let ((vars nil)
+        (proper-vars nil)
+        (is-a-preds nil))
+    ;; Parse BINDINGS.
+    (dolist (x bindings)
+      (if (listp x)
+          ;; Case when the current binding is a list.
+          (cond ((null x)
+                 (error "Empty binding in rule."))
+                ;; Parse :PROPER and :SUPERIOR keyword arguments.
+                (t (destructuring-bind (var &key proper superior) x
+                     (unless (symbolp var)
+                       (error "Expected rule variable to be a symbol, got ~S." var))
+                     (push var vars)
+                     (when proper
+                       (push var proper-vars))
+                     (when superior
+                       (if (setq superior (lookup-element superior))
+                           (push (list var superior) is-a-preds)
+                           (error "Expected superior to be a Scone element, got ~S." superior))))))
+          ;; Case when the current binding is just a variable.
+          (if (symbolp x)
+              (push x vars)
+              (error "Expected rule variable to be a symbol, got ~S." x))))
+    (unless (listp x-y-z-preds)
+      (error "Expected X-Y-Z-PREDS to be a list of predicates, got ~S." x-y-z-preds))
+    (setq x-y-z-preds
+          (mapcar (lambda (pred)
+                    (unless (= (length pred) 3)
+                      (error "Expected predicate to have length 3, got ~S" pred))
+                    (destructuring-bind (x y z) pred
+                      (unless (or (symbolp x) (setq x (lookup-element x)))
+                        (error "Expected X in predicate to be a symbol or Scone element, got ~S." x))
+                      (unless (or (role-node? y) (relation? y))
+                        (error "Expected Y in predicate to be a Scone role or relation, got ~S." y))
+                      (unless (or (symbolp z) (setq z (lookup-element z)))
+                        (error "Expected Z in predicate to be a symbol or Scone element, got ~S." z))
+                      (list x (lookup-element y) z)))
+                  x-y-z-preds))
+    (list vars proper-vars is-a-preds x-y-z-preds)))
+
+(defmacro new-if-added-rule (bindings x-y-z-preds &body body)
   "Macro to define new rules.
-   BINDINGS is a list of variable and type bindings. Each element of BINDINGS
-   can be either a symbol, representing a local variable, or a list where the
-   first element is a symbol and the remaining elements are Scone types that
-   any Scone element substituted for the variable must be a subtype of.
-   Note: It is (currently) up to the user to specify only types that cannot
-   be deduced from X-Y-Z-PREDS. The rule will still work if redundant
-   information is added, but performance may be hindered.
+    BINDINGS is a list of variable bindings with optional keywords :PROPER and :SUPERIOR.
+   :PROPER T specifies that only proper Scone nodes can be substituted for the variable.
+   :SUPERIOR E specifies that only inferiors of E can be substituted for the variable.
    X-Y-Z-PREDS is a list of role or relation predicates. Each predicate must
    be a three-element list (X Y Z), where Y is a role or relation node and
    X and Z are either symbols or Scone elements.
@@ -3553,77 +3591,30 @@
    This means when there is some mapping from the variables to Scone elements
    that satisfy all the bindings and X-Y-Z predicates, the elements are bound
    to the variables and BODY is run."
-  (destructuring-bind (vars is-a-preds)
-      (loop for x in bindings
-            ;; Check if X is of the form (SYM E1 E2 ...).
-            if (listp x)
-            ;; Make sure the first element SYM is a symbol.
-            unless (symbolp (car x)) do (error "~S is not a symbol." (car x)) end
-            ;; Add SYM to the list VARS.
-            and collect (car x) into vars
-            ;; Make sure E1, E2, ... are all Scone elements, then
-            ;; add the whole list (SYM E1 E2 ...) to the list IS-A-PREDS.
-            and if (> (length x) 1)
-            collect (cons (car x)
-                          (mapcar (lambda (e) (or (lookup-element e)
-                                                  (error "~S is not a Scone element" e)))
-                                  (cdr x)))
-            into is-a-preds end
-            ;; Check if X is of the form SYM.
-            else
-            ;; Make sure SYM is a symbol.
-            unless (symbolp x) do (error "~S is not a symbol." x) end
-            ;; Add SYM to the list VARS.
-            and collect x into vars
-            end ; End if (listp x).
-            ;; Check if VARS contains duplicate variables.
-            finally (unless (equal vars (remove-duplicates vars))
-                      (error "~S contains duplicate symbols." vars))
-            ;; Return both VARS and IS-A-PREDS
-            (return (list vars is-a-preds)))
-    (let ((is-a-triggers
-            ;; IS-A-PREDS is of the form ((SYM1 E1-1 E1-2 ...) (SYM2 E2-1 E2-2 ...) ...).
-            ;; Transform it to the form ((SYM1 E1-1) (SYM1 E1-2) ... (SYM2 E2-1) (SYM2 E2-2) ...)
-            (mapcan (lambda (preds)
-                      (mapcar (lambda (e) (list (car preds) e)) (cdr preds))) is-a-preds))
-          (x-y-z-triggers
-            ;; Check that X-Y-Z-PREDS has the form ((X1 Y1 Z1) (X2 Y2 Z2) ...) where
-            ;; each X and Z are either symbols or Scone elements and each Y is a
-            ;; role or relation node.
-            ;; Currently doesn't check that all symbols are scoped in VARS.
-            (mapcar (lambda (pred)
-                      (unless (= (length pred) 3)
-                        (error "~S does not have length 3" pred))
-                      (destructuring-bind (x y z) pred
-                        (unless (or (symbolp x) (setq x (lookup-element x)))
-                          (error "~S is not a symbol or Scone element." (first pred)))
-                        (unless (or (symbolp z) (setq z (lookup-element z)))
-                          (error "~S is not a symbol or Scone element." (third pred)))
-                        (unless (or (role-node? y) (relation? y))
-                          (error "~S is not a role or relation node." y))
-                        (list x (lookup-element y) z)))
-                    x-y-z-preds))
-          (r (gensym))
+  (destructuring-bind
+      (vars proper-vars is-a-preds x-y-z-preds)
+      (validate-rule-spec bindings x-y-z-preds)
+    (let ((r (gensym))
           (x (gensym)))
       `(let ((,r (internal-make-rule
                   :vars ',vars
+                  :proper-vars ',proper-vars
                   :is-a-preds ',is-a-preds
                   :x-y-z-preds ',x-y-z-preds
-                  :proper-vars ',proper-vars
                   :action (lambda ,vars (progn ,@body)))))
          ;; Push rule to global rules list.
          (push ,r *rules*)
          ;; For each X-Y-Z predicate, attach a trigger for this rule to node Y.
          ;; Each trigger looks like (R X Z) where R is this rule and X and Z are
          ;; variables or Scone elements.
-         (dolist (,x ',x-y-z-triggers)
-           (push-element-property (second ,x)
+         (dolist (,x ',x-y-z-preds)
+           (push-element-property (lookup-element (second ,x))
                                   :rule-triggers
                                   (list ,r (first ,x) (third ,x))))
          ;; For each IS-A predicate (X Y), attach a trigger for this rule to node Y.
          ;; Each trigger looks like (R X) where R is this rule and X is a variable.
-         (dolist (,x ',is-a-triggers)
-           (push-element-property (second ,x)
+         (dolist (,x ',is-a-preds)
+           (push-element-property (lookup-element (second ,x))
                                   :rule-triggers
                                   (list ,r (first ,x))))
          ;; Return created rule
@@ -3688,22 +3679,20 @@
    Also removes predicates that have no more variables after substituting
    if they are true.
    Returns the new rule, or NIL if substituting makes a predicate false."
-  ;; PREDS is a list where each element is of the form (SYM E1 E2 ... EN).
-  ;; If VAR equals SYM, SIMPLIFY-IS-A-PREDS checks if E is a subtype of all E1,...,EN.
-  (flet ((simplify-is-a-preds (preds)
+  (flet (;; PREDS looks like ((SYM-1 E-1) (SYM-2 E-2) ... (SYM-N E-N))
+         ;; If VAR equals SYM-I, SIMPLIFY-IS-A-PREDS checks if E is a subtype of E-I.
+         (simplify-is-a-preds (preds)
            ;; Temporary variable to store all predicates not involving VAR.
            (let ((simplified nil))
              ;; Iterate through PREDS, return SIMPLIFIED at the end.
              (dolist (pred preds simplified)
-               (if (eq var (car pred))
+               (if (eq var (first pred))
                    ;; Case when VAR matches SYM.
-                   (with-markers (m)
-                     (progn
-                       (upscan e m)
-                       ;; Predicate is not satisfied, return NIL to outer function.
-                       (unless (every (lambda (e2) (fast-marker-on? e2 m))
-                                      (cdr pred))
-                         (return-from substitute-in-rule))))
+                   (unless (simple-is-x-a-y? e (second pred))
+                     ;; Predicate is not satisfied, return NIL to outer function.
+                     (when *comment-on-rule-check*
+                       (commentary "IS-A predicate not satisfied: (~S ~S) in~%~S" e (second pred) r))
+                     (return-from substitute-in-rule))
                    ;; Case when VAR doesn't match SYM, don't throw away PRED.
                    (push pred simplified)))))
          ;; PREDS is a list where each element is of the form (X Y Z).
@@ -3730,6 +3719,8 @@
                               (not (simple-is-x-a-y? x (the-x-role-of-y y z))))
                          (and (relation? y)
                               (not (statement-true? x y z))))
+                        (when *comment-on-rule-check*
+                          (commentary "X-Y-Z predicate not satisfied: (~S ~S ~S) in~%~S" x y z r))
                         (return-from substitute-in-rule nil))))))))
     ;; Return rule with the variable substituted and extraneous predicates removed.
     (internal-make-rule
@@ -3814,7 +3805,7 @@
    for VAR, and if specified E2 is substituted for VAR2. Mutually recursive
    with CHECK-RULE to find additional elements to substitute."
   (when *comment-on-rule-check*
-    (commentary "Check rule filler ~S ~S ~S ~S ~S." r e var e2 var2))
+    (commentary "Check rule filler ~S ~S ~S ~S in~%~S" e var e2 var2 r))
   (cond ((null (setq r (substitute-in-rule e var r)))
          ;; If substituting E for VAR in R violates a predicate, return NIL.
          (return-from check-rule-filler nil))
