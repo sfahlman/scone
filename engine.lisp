@@ -407,6 +407,10 @@
 (defvar *rules* nil
   "List of active rules to check.")
 
+(defvar *satisfied-rules* nil
+  "List of rule that are satisfied and will be fired when rule checking
+   is complete.")
+
 ;;; ========================================================================
 (subsection "Variables Linking to Essential Scone Elements")
 
@@ -3630,49 +3634,33 @@
    X is an expression that can use variables in BINDINGS and evaluates to
    some Scone element. Y is a role or relation node. Z is one of the variables
    in BINDINGS or a Scone element."
-  (let* ((vars nil)
-         (proper-vars nil)
-         (is-a-preds nil)
-         (r (gensym))
-         (action-y (second x-y-z-action))
-         ;; Determine if Y is an indv-role, type-role, or relation and
-         ;; pick an appropriate action function.
-         (action-function (cond ((indv-role-node? action-y)
-                                 'x-is-the-y-of-z)
-                                ((type-role-node? action-y)
-                                 'x-is-a-y-of-z)
-                                ((relation? action-y)
-                                 'new-statement)
-                                (t (error "~S is not a role or relation." action-y)))))
-    ;; Parse BINDINGS.
-    (dolist (x bindings)
-      (if (listp x)
-          (cond ((null x)
-                 (error "Empty binding in new-lazy-rule."))
-                ((not (symbolp (car x)))
-                 (error "~S is not a symbol." (car x)))
-                ;; Parse :PROPER and :SUPERIOR keyword arguments.
-                (t (destructuring-bind (var &key proper superior) x
-                     (push var vars)
-                     (when proper
-                       (push var proper-vars))
-                     (when (lookup-element superior)
-                       (push (list var superior) is-a-preds)))))
-          (push x vars)))
-    `(let ((,r (internal-make-rule
-                :vars ',vars
-                :is-a-preds ',is-a-preds
-                :x-y-z-preds ',x-y-z-preds
-                :proper-vars ',proper-vars
-                :action (lambda ,vars (,action-function ,@x-y-z-action)))))
-       (push ,r *rules*)
-       ;; Add a trigger to the role or relation Y.
-       ;; Each trigger looks like (R Z) where R is this rule and Z is a
-       ;; variable or Scone element.
-       (push-element-property (lookup-element ,action-y)
-                              :lazy-rule-triggers
-                              (list ,r (third ',x-y-z-action)))
-       ,r)))
+  (destructuring-bind
+      (vars proper-vars is-a-preds x-y-z-preds)
+      (validate-rule-spec bindings x-y-z-preds)
+    (let* ((r (gensym))
+           (action-y (second x-y-z-action))
+           ;; Determine if Y is an indv-role, type-role, or relation and
+           ;; pick an appropriate action function.
+           (action-function (cond ((indv-role-node? action-y)
+                                   'x-is-the-y-of-z)
+                                  ((type-role-node? action-y)
+                                   'x-is-a-y-of-z)
+                                  ((relation? action-y)
+                                   'new-statement)
+                                  (t (error "~S is not a role or relation." action-y)))))
+      `(let ((,r (internal-make-rule
+                  :vars ',vars
+                  :is-a-preds ',is-a-preds
+                  :x-y-z-preds ',x-y-z-preds
+                  :proper-vars ',proper-vars
+                  :action (lambda ,vars (,action-function ,@x-y-z-action)))))
+         (push ,r *rules*)
+         ;; Add a trigger to the role or relation Y.
+         ;; Each trigger looks like (R Z) where R is this rule and Z is a variable.
+         (push-element-property (lookup-element ,action-y)
+                                :lazy-rule-triggers
+                                (list ,r (third ',x-y-z-action)))
+         ,r))))
 
 (defun substitute-in-rule (e var r)
   "Internal helper function to substitute an element for a variable in rule R.
@@ -3766,7 +3754,9 @@
                         (check-rule-filler r x a))
                       ;; Variable is on left and right.
                       ;; See if the rule can be satisfied by substituting X for A and Z for C.
-                      (check-rule-filler r x a z c))))))))))
+                      (check-rule-filler r x a z c)))))))))
+  (when *satisfied-rules*
+    (fire-rules)))
 
 (defun check-rule-x-is-a-y (x y)
   "Function to check if any rules are newly satisfied after adding
@@ -3783,7 +3773,9 @@
           ;; Each trigger is of the form (R SYM). R is a rule, SYM is a variable.
           (dolist (trigger (get-element-property superior :rule-triggers))
             ;; See if the rule can be satisfied by substituting X for SYM in R.
-            (check-rule-filler (first trigger) x (second trigger))))))))
+            (check-rule-filler (first trigger) x (second trigger)))))))
+  (when *satisfied-rules*
+    (fire-rules)))
 
 (defun check-rule-x-of-y (x y)
   "Function to check if there are any lazy rules that can be used to find
@@ -3798,12 +3790,13 @@
         ;; Each trigger is of the form (R SYM). R is a rule, SYM is a variable
         ;; representing the parent node Y.
         (dolist (trigger (get-element-property superior :lazy-rule-triggers))
-          (check-rule-filler (first trigger) y (second trigger)))))))
+          (check-rule-filler (first trigger) y (second trigger))))))
+  (when *satisfied-rules*
+    (fire-rules)))
 
 (defun check-rule-filler (r e var &optional e2 var2)
   "Function to check if rule R can be satisfied if E is substituted
-   for VAR, and if specified E2 is substituted for VAR2. Mutually recursive
-   with CHECK-RULE to find additional elements to substitute."
+   for VAR, and if specified E2 is substituted for VAR2."
   (when *comment-on-rule-check*
     (commentary "Check rule filler ~S ~S ~S ~S in~%~S" e var e2 var2 r))
   (cond ((null (setq r (substitute-in-rule e var r)))
@@ -3814,79 +3807,81 @@
          (return-from check-rule-filler nil))
         ;; If no predicates are violated after substituting, start recursively
         ;; finding more elements to substitute for variables.
-        (t (check-rule r))))
+        (t
+         (when (null (rule-x-y-z-preds r))
+           ;; No more X-Y-Z predicates to satisfy in this rule.
+           (if (null (rule-is-a-preds r))
+               ;; No more is-a predicates to satisfy in this rule, so rule is true.
+               (progn
+                 ;; This COMMENTARY actually isn't that useful, since it only
+                 ;; shows the rule after already substituting variables.
+                 (when *comment-on-rule-check*
+                   (commentary "Rule true ~S." r))
+                 ;; The elements that satisfy rule R are now stored in its VARS field.
+                 ;; Add the rule to the list of satisfied rules.
+                 (push r *satisfied-rules*)
+                 (return-from check-rule-filler t))
+               ;; If there are still is-a predicates, then there are variables unconnected
+               ;; to other X-Y-Z predicates. Treat this rule as ill-defined and return NIL.
+               (return-from check-rule-filler nil)))
+         ;; Look at the first X-Y-Z predicate to find elements to substitute in the rule.
+         (let* ((pred (car (rule-x-y-z-preds r)))
+                (left (lookup-element (first pred))) ; LEFT is either an element or NIL.
+                (y (lookup-element-test (second pred))) ; Y is either a role or relation node.
+                (right (lookup-element (third pred)))) ; RIGHT is either an element or NIL.
+           ;; PRED is of the form (X Y Z). LEFT is the element X if non-NIL, and RIGHT is
+           ;; the element Z if non-NIL.
+           (cond ((and left
+                       (null right))
+                  ;; Left element is filled, scan for possible right elements.
+                  (with-markers (m1)
+                    (progn
+                      ;; Create temporary marker M2 for scanning.
+                      (with-markers (m2)
+                        (progn
+                          (cond ((role-node? y)
+                                 (mark-role-inverse y left m2))
+                                ((relation? y)
+                                 (mark-rel y left m2)))
+                          ;; Mark most specific elements to search as rule fillers.
+                          ;; Only mark proper elements if declared that way in rule.
+                          (if (member (third pred) (rule-proper-vars r))
+                              (mark-proper m2 m1)
+                              (mark-most-specific m2 m1))))
+                      (do-marked (z m1)
+                        ;; We know role/relation predicate (LEFT Y Z) is true, so try substituting
+                        ;; element Z for variable Z in PRED.
+                        (check-rule-filler r z (third pred))))))
+                 ((and (null left)
+                       right)
+                  ;; Right element is filled, scan for possible left elements.
+                  (with-markers (m1)
+                    (progn
+                      ;; Create temporary marker M2 for scanning.
+                      (with-markers (m2)
+                        (progn
+                          (cond ((role-node? y)
+                                 (mark-role y right m2))
+                                ((relation? y)
+                                 (mark-rel-inverse y right m2)))
+                          ;; Mark most specific elements to search as rule fillers.
+                          ;; Only mark proper elements if declared that way in rule.
+                          (if (member (first pred) (rule-proper-vars r))
+                              (mark-proper m2 m1)
+                              (mark-most-specific m2 m1))))
+                      (do-marked (z m1)
+                        ;; We know role/relation predicate (X Y RIGHT) is true, so try substituting
+                        ;; element X for variable X in PRED.
+                        (check-rule-filler r z (first pred)))))))))))
 
-(defun check-rule (r)
-  "Function to check if rule R can be satisfied in the network. Mutually
-   recursive with CHECK-RULE-FILLER and finds more elements to substitute for
-   the variables in R."
-  (when *comment-on-rule-check*
-    (commentary "Checking rule ~S." r))
-  (when (null (rule-x-y-z-preds r))
-    ;; No more X-Y-Z predicates to satisfy in this rule.
-    (if (null (rule-is-a-preds r))
-        ;; No more is-a predicates to satisfy in this rule, so rule is true.
-        (progn
-          ;; This COMMENTARY actually isn't that useful, since it only
-          ;; shows the rule after already substituting variables.
-          (when *comment-on-rule-check*
-            (commentary "Rule true ~S." r))
-          ;; The elements that satisfy rule R are now stored in its VARS field.
-          ;; Apply the rule action to those elements.
-          ;; Return the result of applying the action. (Return value not used.)
-          (return-from check-rule (apply (rule-action r) (rule-vars r))))
-        ;; If there are still is-a predicates, then there are variables unconnected
-        ;; to other X-Y-Z predicates. Treat this rule as ill-defined and return NIL.
-        (return-from check-rule nil)))
-  ;; Look at the first X-Y-Z predicate to find elements to substitute in the rule.
-  (let* ((pred (car (rule-x-y-z-preds r)))
-         (left (lookup-element (first pred))) ; LEFT is either an element or NIL.
-         (y (lookup-element-test (second pred))) ; Y is either a role or relation node.
-         (right (lookup-element (third pred)))) ; RIGHT is either an element or NIL.
-    ;; PRED is of the form (X Y Z). LEFT is the element X if non-NIL, and RIGHT is
-    ;; the element Z if non-NIL.
-    (cond ((and left
-                (null right))
-           ;; Left element is filled, scan for possible right elements.
-           (with-markers (m1)
-             (progn
-               ;; Create temporary marker M2 for scanning.
-               (with-markers (m2)
-                 (progn
-                   (cond ((role-node? y)
-                          (mark-role-inverse y left m2))
-                         ((relation? y)
-                          (mark-rel y left m2)))
-                   ;; Mark most specific elements to search as rule fillers.
-                   ;; Only mark proper elements if declared that way in rule.
-                   (if (member (third pred) (rule-proper-vars r))
-                       (mark-proper m2 m1)
-                       (mark-most-specific m2 m1))))
-               (do-marked (z m1)
-                 ;; We know role/relation predicate (LEFT Y Z) is true, so try substituting
-                 ;; element Z for variable Z in PRED.
-                 (check-rule-filler r z (third pred))))))
-          ((and (null left)
-                right)
-           ;; Right element is filled, scan for possible left elements.
-           (with-markers (m1)
-             (progn
-               ;; Create temporary marker M2 for scanning.
-               (with-markers (m2)
-                 (progn
-                   (cond ((role-node? y)
-                          (mark-role y right m2))
-                         ((relation? y)
-                          (mark-rel-inverse y right m2)))
-                   ;; Mark most specific elements to search as rule fillers.
-                   ;; Only mark proper elements if declared that way in rule.
-                   (if (member (first pred) (rule-proper-vars r))
-                       (mark-proper m2 m1)
-                       (mark-most-specific m2 m1))))
-               (do-marked (z m1)
-                 ;; We know role/relation predicate (X Y RIGHT) is true, so try substituting
-                 ;; element X for variable X in PRED.
-                 (check-rule-filler r z (first pred)))))))))
+(defun fire-rules ()
+  (setq *satisfied-rules* (nreverse *satisfied-rules*))
+  (loop while *satisfied-rules*
+        ;; Fire rules starting from ones that were found satisfied first.
+        do (let ((satisfied-rules (nreverse *satisfied-rules*)))
+             (setq *satisfied-rules* nil)
+             (dolist (r satisfied-rules) 
+               (apply (rule-action r) (rule-vars r))))))
 
 ;;; ***************************************************************************
 (section "Marker Operations and Scans")
