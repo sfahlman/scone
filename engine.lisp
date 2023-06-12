@@ -235,7 +235,7 @@
    defined type and adds the element to that type, comment on this via
    COMMENTARY.")
 
-(defvar *comment-on-rule-check* t
+(defvar *comment-on-rule-check* nil
   "When Scone checks if rules are satisfied, comment on this via
    COMMENTARY.")
 
@@ -3539,7 +3539,8 @@
   ;; List of variables that must be proper.
   (proper-vars nil :type list)
   ;; Function with VARS as the argument list.
-  (action nil))
+  (action nil)
+  (repr nil))
 
 (defun validate-rule-spec (bindings x-y-z-preds)
   (let ((vars nil)
@@ -3605,7 +3606,8 @@
                   :proper-vars ',proper-vars
                   :is-a-preds ',is-a-preds
                   :x-y-z-preds ',x-y-z-preds
-                  :action (lambda ,vars (progn ,@body)))))
+                  :action (lambda ,vars (declare (ignorable ,@vars)) (progn ,@body))
+                  :repr ',body)))
          ;; Push rule to global rules list.
          (push ,r *rules*)
          ;; For each X-Y-Z predicate, attach a trigger for this rule to node Y.
@@ -3678,8 +3680,6 @@
                    ;; Case when VAR matches SYM.
                    (unless (simple-is-x-a-y? e (second pred))
                      ;; Predicate is not satisfied, return NIL to outer function.
-                     (when *comment-on-rule-check*
-                       (commentary "IS-A predicate not satisfied: (~S ~S) in~%~S" e (second pred) r))
                      (return-from substitute-in-rule))
                    ;; Case when VAR doesn't match SYM, don't throw away PRED.
                    (push pred simplified)))))
@@ -3707,8 +3707,6 @@
                               (not (simple-is-x-a-y? x (the-x-role-of-y y z))))
                          (and (relation? y)
                               (not (statement-true? x y z))))
-                        (when *comment-on-rule-check*
-                          (commentary "X-Y-Z predicate not satisfied: (~S ~S ~S) in~%~S" x y z r))
                         (return-from substitute-in-rule nil))))))))
     ;; Return rule with the variable substituted and extraneous predicates removed.
     (internal-make-rule
@@ -3716,11 +3714,16 @@
      :is-a-preds (simplify-is-a-preds (rule-is-a-preds r))
      :x-y-z-preds (simplify-x-y-z-preds (rule-x-y-z-preds r))
      :proper-vars (rule-proper-vars r)
-     :action (rule-action r))))
+     :action (rule-action r)
+     :repr (rule-repr r))))
 
 (defun check-rule-x-y-z (x y z)
   "Function to check if any rules are newly satisfied after adding
    role statement X is the Y of Z or relation statement X Y Z."
+  ;; Do not check rules for derived map nodes since they are created
+  ;; implicitly and not from any added knowledge.
+  (when (or (map-node? x) (map-node? z))
+    (return-from check-rule-x-y-z nil))
   (when *comment-on-rule-check*
     (commentary "Check rule x-y-z ~S ~S ~S." x y z))
   (with-markers (m)
@@ -3761,6 +3764,10 @@
 (defun check-rule-x-is-a-y (x y)
   "Function to check if any rules are newly satisfied after adding
    an IS-A or EQ link between X and Y."
+  ;; Do not check rules for derived map nodes since they are created
+  ;; implicitly and not from any added knowledge.
+  (when (or (map-node? x) (map-node? y))
+    (return-from check-rule-x-is-a-y nil))
   (when *comment-on-rule-check*
     (commentary "Check rule ~S is a ~S." x y))
   (with-markers (m)
@@ -3797,8 +3804,6 @@
 (defun check-rule-filler (r e var &optional e2 var2)
   "Function to check if rule R can be satisfied if E is substituted
    for VAR, and if specified E2 is substituted for VAR2."
-  (when *comment-on-rule-check*
-    (commentary "Check rule filler ~S ~S ~S ~S in~%~S" e var e2 var2 r))
   (cond ((null (setq r (substitute-in-rule e var r)))
          ;; If substituting E for VAR in R violates a predicate, return NIL.
          (return-from check-rule-filler nil))
@@ -3816,7 +3821,7 @@
                  ;; This COMMENTARY actually isn't that useful, since it only
                  ;; shows the rule after already substituting variables.
                  (when *comment-on-rule-check*
-                   (commentary "Rule true ~S." r))
+                   (commentary "Rule true ~S ~S." (reverse (rule-vars r)) (rule-repr r)))
                  ;; The elements that satisfy rule R are now stored in its VARS field.
                  ;; Add the rule to the list of satisfied rules.
                  (push r *satisfied-rules*)
