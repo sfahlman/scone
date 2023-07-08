@@ -3818,8 +3818,8 @@
            (if (null (rule-is-a-preds r))
                ;; No more is-a predicates to satisfy in this rule, so rule is true.
                (progn
-                 ;; This COMMENTARY actually isn't that useful, since it only
-                 ;; shows the rule after already substituting variables.
+                 ;; When a rule is satisfied, this COMMENTARY prints out the elements
+                 ;; satisfying the rule and the action of the rule.
                  (when *comment-on-rule-check*
                    (commentary "Rule true ~S ~S." (reverse (rule-vars r)) (rule-repr r)))
                  ;; The elements that satisfy rule R are now stored in its VARS field.
