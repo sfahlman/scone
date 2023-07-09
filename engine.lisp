@@ -4,7 +4,7 @@
 ;;;
 ;;; Author & Maintainer: Scott E. Fahlman
 ;;; ***************************************************************************
-;;; Copyright (C) 2003-2021, Carnegie Mellon University.
+;;; Copyright (C) 2003-2023, Carnegie Mellon University.
 ;;;
 ;;; The Scone software is made available to the public under the
 ;;; Apache 2.0 open source license.  A copy of this license is
